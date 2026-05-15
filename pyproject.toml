@@ -1,0 +1,11 @@
+[project]
+name = "chatapp-backend"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = [
+    "pre-commit>=4.6.0",
+    "pylint>=4.0.5",
+    "ruff>=0.15.13",
+]
