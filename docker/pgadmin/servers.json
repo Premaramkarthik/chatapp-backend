@@ -1,0 +1,14 @@
+{
+  "Servers": {
+    "1": {
+      "Name": "chatapp Postgres",
+      "Group": "Local",
+      "Host": "postgres",
+      "Port": 5432,
+      "MaintenanceDB": "chatapp",
+      "Username": "chatapp",
+      "Password": "chatapp",
+      "SSLMode": "prefer"
+    }
+  }
+}
