@@ -12,6 +12,7 @@ from fastapi import HTTPException, status
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from v1.middleware.state import RATE_LIMIT_STATE_KEY, ensure_state
+from v1.utils.redis_cache import auth_redis_cache
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,17 @@ class InMemoryRateLimitStore:
                 return RateLimitDecision(False, 0, retry_after)
             hits.append(now)
             return RateLimitDecision(True, max(0, limit - len(hits)), 0)
+
+
+class RedisRateLimitStore:
+    """Redis-backed fixed-window rate limiter with local fallback in cache facade."""
+
+    async def hit(self, key: str, *, limit: int, window_sec: int) -> RateLimitDecision:
+        redis_key = f"rate:{key}:{int(time.time() // window_sec)}"
+        count = await auth_redis_cache.increment(redis_key, ttl_sec=window_sec)
+        if count > limit:
+            return RateLimitDecision(False, 0, window_sec)
+        return RateLimitDecision(True, max(0, limit - count), 0)
 
 
 class RateLimitMiddleware:

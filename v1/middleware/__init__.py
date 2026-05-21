@@ -8,8 +8,13 @@ from v1.middleware.cors import add_cors_middleware
 from v1.middleware.database import DatabaseSessionMiddleware
 from v1.middleware.error_handling import ErrorHandlingMiddleware
 from v1.middleware.logging import RequestResponseLoggingMiddleware
-from v1.middleware.rate_limit import InMemoryRateLimitStore, RateLimitMiddleware
+from v1.middleware.rate_limit import (
+    InMemoryRateLimitStore,
+    RateLimitMiddleware,
+    RedisRateLimitStore,
+)
 from v1.middleware.request_id import RequestIdMiddleware
+from v1.middleware.security import CSRFMiddleware, SecurityHeadersMiddleware
 
 
 def setup_middleware(app: FastAPI) -> None:
@@ -27,6 +32,12 @@ def setup_middleware(app: FastAPI) -> None:
             public_prefixes=settings.middleware.auth_public_prefixes,
         )
 
+    if settings.middleware.csrf_enabled:
+        app.add_middleware(
+            CSRFMiddleware,
+            excluded_paths=settings.middleware.csrf_excluded_paths,
+        )
+
     if settings.middleware.db_session_enabled:
         app.add_middleware(
             DatabaseSessionMiddleware,
@@ -34,9 +45,12 @@ def setup_middleware(app: FastAPI) -> None:
         )
 
     if settings.middleware.rate_limit_enabled:
+        rate_limit_store = (
+            RedisRateLimitStore() if settings.redis.enabled else InMemoryRateLimitStore()
+        )
         app.add_middleware(
             RateLimitMiddleware,
-            store=InMemoryRateLimitStore(),
+            store=rate_limit_store,
             limit=settings.middleware.rate_limit_requests,
             window_sec=settings.middleware.rate_limit_window_sec,
             excluded_paths=settings.middleware.rate_limit_excluded_paths,
@@ -48,6 +62,8 @@ def setup_middleware(app: FastAPI) -> None:
     )
     app.add_middleware(ErrorHandlingMiddleware)
     add_cors_middleware(app)
+    if settings.middleware.security_headers_enabled:
+        app.add_middleware(SecurityHeadersMiddleware)
     app.add_middleware(
         RequestIdMiddleware,
         header_name=settings.middleware.request_id_header,

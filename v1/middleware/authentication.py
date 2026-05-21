@@ -7,7 +7,9 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from v1.core.settings import settings
-from v1.middleware.state import PRINCIPAL_STATE_KEY, ensure_state
+from v1.middleware.state import AUTH_SESSION_STATE_KEY, PRINCIPAL_STATE_KEY, ensure_state
+from v1.services.auth.session_resolver import auth_session_resolver
+from v1.utils.exception import AuthenticationError
 from v1.utils.keyclock_adapter import keycloak_verifier
 
 
@@ -32,14 +34,30 @@ class JWTAuthenticationMiddleware:
             await self.app(scope, receive, send)
             return
 
-        authorization = Headers(scope=scope).get("authorization")
-        if not authorization:
-            raise HTTPException(
-                status_code=status.HTTP_401_UNAUTHORIZED,
-                detail="Missing bearer token",
-                headers={"WWW-Authenticate": "Bearer"},
-            )
+        headers = Headers(scope=scope)
+        authorization = headers.get("authorization")
+        if authorization:
+            await self._authenticate_bearer(authorization, scope, receive, send)
+            return
 
+        session_token = _cookie_value(headers.get("cookie"), settings.auth.cookie_name)
+        if session_token:
+            await self._authenticate_session_cookie(session_token, scope, receive, send)
+            return
+
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Missing authentication credentials",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+
+    async def _authenticate_bearer(
+        self,
+        authorization: str,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
         scheme, _, token = authorization.partition(" ")
         if scheme.lower() != "bearer" or not token:
             raise HTTPException(
@@ -52,6 +70,27 @@ class JWTAuthenticationMiddleware:
         ensure_state(scope)[PRINCIPAL_STATE_KEY] = principal
         await self.app(scope, receive, send)
 
+    async def _authenticate_session_cookie(
+        self,
+        session_token: str,
+        scope: Scope,
+        receive: Receive,
+        send: Send,
+    ) -> None:
+        try:
+            principal, session = await auth_session_resolver.resolve(session_token)
+        except AuthenticationError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail=str(exc),
+                headers={"WWW-Authenticate": "Bearer"},
+            ) from exc
+
+        state = ensure_state(scope)
+        state[PRINCIPAL_STATE_KEY] = principal
+        state[AUTH_SESSION_STATE_KEY] = session
+        await self.app(scope, receive, send)
+
     def _requires_auth(self, path: str) -> bool:
         if not settings.middleware.auth_enabled:
             return False
@@ -60,3 +99,13 @@ class JWTAuthenticationMiddleware:
         if self.public_prefixes and path.startswith(self.public_prefixes):
             return False
         return path.startswith(self.protected_prefixes)
+
+
+def _cookie_value(cookie_header: str | None, name: str) -> str | None:
+    if not cookie_header:
+        return None
+    for item in cookie_header.split(";"):
+        key, _, value = item.strip().partition("=")
+        if key == name:
+            return value
+    return None

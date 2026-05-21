@@ -9,6 +9,7 @@ from starlette.types import Scope
 REQUEST_ID_STATE_KEY = "request_id"
 START_TIME_STATE_KEY = "start_time"
 PRINCIPAL_STATE_KEY = "principal"
+AUTH_SESSION_STATE_KEY = "auth_session"
 DB_CONNECTION_STATE_KEY = "db"
 RATE_LIMIT_STATE_KEY = "rate_limit"
 

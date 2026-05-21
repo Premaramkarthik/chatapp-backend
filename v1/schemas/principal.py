@@ -13,4 +13,5 @@ class KeycloakPrincipal(BaseModel):
     email_verified: bool = False
     display_name: str | None = None
     preferred_username: str | None = None
+    identity_provider: str | None = None
     roles: list[str] = []

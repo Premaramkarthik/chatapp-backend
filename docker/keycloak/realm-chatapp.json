@@ -1,0 +1,151 @@
+{
+  "realm": "chatapp",
+  "enabled": true,
+  "registrationAllowed": false,
+  "resetPasswordAllowed": true,
+  "rememberMe": true,
+  "verifyEmail": true,
+  "loginWithEmailAllowed": true,
+  "duplicateEmailsAllowed": false,
+  "bruteForceProtected": true,
+  "accessTokenLifespan": 600,
+  "ssoSessionIdleTimeout": 1800,
+  "ssoSessionMaxLifespan": 43200,
+  "ssoSessionIdleTimeoutRememberMe": 2592000,
+  "ssoSessionMaxLifespanRememberMe": 5184000,
+  "actionTokenGeneratedByUserLifespan": 900,
+  "passwordPolicy": "length(12) and notUsername(undefined) and notEmail(undefined) and passwordHistory(5)",
+  "smtpServer": {
+    "host": "mailpit",
+    "port": "1025",
+    "from": "no-reply@chatapp.local",
+    "auth": "false",
+    "ssl": "false",
+    "starttls": "false"
+  },
+  "roles": {
+    "realm": [
+      {
+        "name": "admin",
+        "description": "Global administrator access."
+      },
+      {
+        "name": "moderator",
+        "description": "Global moderation access."
+      },
+      {
+        "name": "support",
+        "description": "Global support access."
+      },
+      {
+        "name": "system",
+        "description": "System/service access."
+      }
+    ],
+    "client": {
+      "chatapp-api": [
+        {
+          "name": "trip:create"
+        },
+        {
+          "name": "trip:update"
+        },
+        {
+          "name": "trip:join"
+        },
+        {
+          "name": "message:send"
+        },
+        {
+          "name": "message:create-room"
+        },
+        {
+          "name": "profile:update"
+        },
+        {
+          "name": "session:manage"
+        }
+      ]
+    }
+  },
+  "clients": [
+    {
+      "clientId": "chatapp-web",
+      "name": "chatapp-web",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "change-me",
+      "publicClient": false,
+      "standardFlowEnabled": true,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8000/v1/auth/signin/callback"
+      ],
+      "webOrigins": [
+        "http://localhost:3000"
+      ],
+      "attributes": {
+        "pkce.code.challenge.method": "S256",
+        "post.logout.redirect.uris": "http://localhost:3000"
+      },
+      "protocolMappers": [
+        {
+          "name": "chatapp-api-audience",
+          "protocol": "openid-connect",
+          "protocolMapper": "oidc-audience-mapper",
+          "consentRequired": false,
+          "config": {
+            "included.client.audience": "chatapp-api",
+            "id.token.claim": "false",
+            "access.token.claim": "true"
+          }
+        }
+      ]
+    },
+    {
+      "clientId": "chatapp-api",
+      "name": "chatapp-api",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false
+    },
+    {
+      "clientId": "chatapp-backend-admin",
+      "name": "chatapp-backend-admin",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "clientAuthenticatorType": "client-secret",
+      "secret": "change-me",
+      "publicClient": false,
+      "standardFlowEnabled": false,
+      "implicitFlowEnabled": false,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": true
+    }
+  ],
+  "users": [
+    {
+      "username": "service-account-chatapp-backend-admin",
+      "enabled": true,
+      "serviceAccountClientId": "chatapp-backend-admin",
+      "clientRoles": {
+        "realm-management": [
+          "query-users",
+          "view-users",
+          "manage-users",
+          "query-clients",
+          "view-clients"
+        ]
+      }
+    }
+  ],
+  "identityProviders": []
+}

@@ -14,6 +14,7 @@ from v1.core.settings import settings
 from v1.schemas.principal import KeycloakPrincipal
 from v1.utils.exception import AuthenticationError
 from v1.utils.logger import get_logger
+from v1.utils.redis_cache import auth_redis_cache
 
 logger = get_logger(__name__)
 
@@ -62,6 +63,7 @@ class KeycloakVerifier:
             email_verified=bool(claims.get("email_verified", False)),
             display_name=claims.get("name"),
             preferred_username=claims.get("preferred_username"),
+            identity_provider=claims.get("identity_provider") or claims.get("idp"),
             roles=roles,
         )
 
@@ -77,6 +79,29 @@ class KeycloakVerifier:
         except Exception as exc:
             return KeycloakHealth(ok=False, detail=f"{type(exc).__name__}: {exc}")
         return KeycloakHealth(ok=True, detail="ok")
+
+    async def refresh_jwks(self) -> None:
+        """Proactively fetch JWKS so key rotation failures surface early."""
+        if not settings.keycloak.enabled:
+            return
+        try:
+            async with httpx.AsyncClient(timeout=3.0) as client:
+                response = await client.get(settings.keycloak.jwks_url)
+                response.raise_for_status()
+                jwks = response.json()
+                await auth_redis_cache.set_json(
+                    f"auth:jwks:{settings.keycloak.realm}",
+                    jwks,
+                    ttl_sec=settings.keycloak.jwks_cache_ttl_sec,
+                )
+                await auth_redis_cache.set_json(
+                    f"auth:jwks:stale:{settings.keycloak.realm}",
+                    jwks,
+                    ttl_sec=settings.keycloak.stale_jwks_ttl_sec,
+                )
+        except Exception as exc:
+            logger.warning("keycloak_jwks_refresh_failed error_type={}", type(exc).__name__)
+            raise
 
 
 def _extract_roles(claims: dict[str, Any]) -> list[str]:

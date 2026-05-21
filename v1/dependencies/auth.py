@@ -2,13 +2,15 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Annotated
 
-from fastapi import HTTPException, Request, Security, status
+from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
-from v1.middleware.state import PRINCIPAL_STATE_KEY
+from v1.middleware.state import AUTH_SESSION_STATE_KEY, PRINCIPAL_STATE_KEY
 from v1.schemas.principal import KeycloakPrincipal
+from v1.services.auth.models import AuthSession
 from v1.utils.keyclock_adapter import keycloak_verifier
 
 bearer_scheme = HTTPBearer(auto_error=False)
@@ -31,3 +33,30 @@ async def get_current_principal(
             headers={"WWW-Authenticate": "Bearer"},
         )
     return await keycloak_verifier.verify_token(credentials.credentials)
+
+
+async def get_current_auth_session(request: Request) -> AuthSession:
+    """Return the current BFF auth session from request state."""
+    session = getattr(request.state, AUTH_SESSION_STATE_KEY, None)
+    if isinstance(session, AuthSession):
+        return session
+    raise HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Session cookie authentication is required",
+    )
+
+
+def require_capability(capability: str) -> Callable:
+    """Build a FastAPI dependency requiring a client/API capability role."""
+
+    async def dependency(
+        principal: Annotated[KeycloakPrincipal, Depends(get_current_principal)],
+    ) -> KeycloakPrincipal:
+        if capability in principal.roles or "admin" in principal.roles:
+            return principal
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Missing required capability: {capability}",
+        )
+
+    return dependency

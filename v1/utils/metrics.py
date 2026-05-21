@@ -14,6 +14,8 @@ class MetricsRegistry:
     def __init__(self) -> None:
         self._lock = Lock()
         self._http_requests: dict[tuple[str, str, str], HttpMetric] = defaultdict(HttpMetric)
+        self._counters: dict[tuple[str, tuple[tuple[str, str], ...]], int] = defaultdict(int)
+        self._totals: dict[tuple[str, tuple[tuple[str, str], ...]], float] = defaultdict(float)
 
     def record_http_request(
         self,
@@ -58,7 +60,49 @@ class MetricsRegistry:
                 f"{{{labels}}} {metric.duration_seconds_total:.6f}"
             )
 
+        with self._lock:
+            counters = dict(self._counters)
+        for (name, labels_tuple), count in sorted(counters.items()):
+            lines.extend(
+                [
+                    f"# HELP chatapp_{name} Application counter.",
+                    f"# TYPE chatapp_{name} counter",
+                ]
+            )
+            labels = ",".join(
+                f'{_escape_label(key)}="{_escape_label(value)}"' for key, value in labels_tuple
+            )
+            suffix = f"{{{labels}}}" if labels else ""
+            lines.append(f"chatapp_{name}{suffix} {count}")
+
+        with self._lock:
+            totals = dict(self._totals)
+        for (name, labels_tuple), value in sorted(totals.items()):
+            lines.extend(
+                [
+                    f"# HELP chatapp_{name} Application observed total.",
+                    f"# TYPE chatapp_{name} counter",
+                ]
+            )
+            labels = ",".join(
+                f'{_escape_label(key)}="{_escape_label(value)}"' for key, value in labels_tuple
+            )
+            suffix = f"{{{labels}}}" if labels else ""
+            lines.append(f"chatapp_{name}{suffix} {value:.6f}")
+
         return "\n".join(lines) + "\n"
+
+    def increment(self, name: str, **labels: str) -> None:
+        """Increment a named counter with optional labels."""
+        labels_tuple = tuple(sorted((key, str(value)) for key, value in labels.items()))
+        with self._lock:
+            self._counters[(name, labels_tuple)] += 1
+
+    def observe_total(self, name: str, *, duration_seconds: float, **labels: str) -> None:
+        """Add one duration observation to a cumulative total."""
+        labels_tuple = tuple(sorted((key, str(value)) for key, value in labels.items()))
+        with self._lock:
+            self._totals[(name, labels_tuple)] += duration_seconds
 
 
 def _labels(*, method: str, path: str, status_class: str) -> str:
