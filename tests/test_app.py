@@ -1,6 +1,7 @@
 """FastAPI app smoke tests."""
 
 from fastapi.testclient import TestClient
+
 from v1.app import app
 
 
@@ -18,3 +19,11 @@ def test_version() -> None:
 
     assert response.status_code == 200
     assert response.json()["name"] == "chatapp API"
+
+
+def test_docs_use_docs_specific_content_security_policy() -> None:
+    with TestClient(app) as client:
+        response = client.get("/docs")
+
+    assert response.status_code == 200
+    assert "https://cdn.jsdelivr.net" in response.headers["content-security-policy"]

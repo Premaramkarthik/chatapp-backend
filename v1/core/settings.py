@@ -96,6 +96,18 @@ class MiddlewareSettings(EnvSettings):
         "default-src 'self'; frame-ancestors 'none'; base-uri 'self'",
         alias="MIDDLEWARE_CONTENT_SECURITY_POLICY",
     )
+    docs_content_security_policy: str = Field(
+        "default-src 'self'; "
+        "script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; "
+        "img-src 'self' data: https://fastapi.tiangolo.com; "
+        "font-src 'self' data: https://cdn.jsdelivr.net; "
+        "connect-src 'self'; "
+        "frame-ancestors 'none'; "
+        "base-uri 'self'",
+        alias="MIDDLEWARE_DOCS_CONTENT_SECURITY_POLICY",
+    )
+    docs_csp_paths_raw: str = Field("/docs,/redoc", alias="MIDDLEWARE_DOCS_CSP_PATHS")
 
     @property
     def cors_origins(self) -> list[str]:
@@ -132,6 +144,10 @@ class MiddlewareSettings(EnvSettings):
     @property
     def csrf_excluded_paths(self) -> set[str]:
         return set(parse_csv(self.csrf_excluded_paths_raw))
+
+    @property
+    def docs_csp_paths(self) -> set[str]:
+        return set(parse_csv(self.docs_csp_paths_raw))
 
 
 class DatabaseSettings(EnvSettings):

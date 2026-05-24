@@ -18,15 +18,14 @@ class SecurityHeadersMiddleware:
         self.app = app
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        csp = _content_security_policy_for(scope)
+
         async def send_with_headers(message: Message) -> None:
             if scope["type"] == "http" and message["type"] == "http.response.start":
                 headers = list(message.get("headers", []))
                 headers.extend(
                     [
-                        (
-                            b"content-security-policy",
-                            settings.middleware.content_security_policy.encode(),
-                        ),
+                        (b"content-security-policy", csp.encode()),
                         (b"strict-transport-security", b"max-age=31536000; includeSubDomains"),
                         (b"x-frame-options", b"DENY"),
                         (b"referrer-policy", b"no-referrer"),
@@ -84,3 +83,9 @@ def _cookie_value(cookie_header: str | None, name: str) -> str | None:
         if key == name:
             return value
     return None
+
+
+def _content_security_policy_for(scope: Scope) -> str:
+    if scope["type"] == "http" and scope.get("path") in settings.middleware.docs_csp_paths:
+        return settings.middleware.docs_content_security_policy
+    return settings.middleware.content_security_policy
