@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from domains.auth import AuthService
-from domains.users.use_cases.bootstrap_user import BootstrapUser
+from domains.users.bootstrap import BootstrapUser
 from infrastructure.database.repositories import PostgresUserRepository
 
 

@@ -42,7 +42,7 @@ from domains.auth.signup_security import (
     request_hash,
     validate_captcha,
 )
-from domains.users.entities.user import BootstrapUserCommand, User
+from domains.users.user import BootstrapUserCommand, User
 from infrastructure.database.repositories.auth import PostgresAuthRepository
 from infrastructure.database.repositories.users import PostgresUserRepository
 from infrastructure.keycloak.adapter import keycloak_verifier

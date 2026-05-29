@@ -4,8 +4,8 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from domains.users.entities.user import BootstrapUserCommand
-from domains.users.use_cases.bootstrap_user import BootstrapUser
+from domains.users.bootstrap import BootstrapUser
+from domains.users.user import BootstrapUserCommand
 from infrastructure.database.repositories import PostgresUserRepository
 from v1.dependencies.auth import get_current_principal, require_capability
 from v1.dependencies.container import get_bootstrap_user_use_case

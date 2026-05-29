@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
-from domains.users.entities.user import BootstrapUserCommand, User
-from domains.users.repositories.user_repository import UserRepository
+from domains.users.repository import UserRepository
+from domains.users.user import BootstrapUserCommand, User
 
 
 class BootstrapUser:

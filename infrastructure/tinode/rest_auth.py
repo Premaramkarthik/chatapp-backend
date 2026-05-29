@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import base64
 import json
+import time
 from typing import Any
 
 from core.config.settings import settings
+from core.observability.metrics import metrics_registry
 from infrastructure.database.connection import call_json_function
 from v1.utils.base import TinodeAuthError
 
@@ -21,18 +23,27 @@ def verify_shared_secret(header_secret: str | None, query_secret: str | None) ->
 
 async def handle_tinode_request(payload: dict[str, Any]) -> dict[str, Any]:
     """Handle Tinode REST authenticator endpoint payloads."""
+    started = time.perf_counter()
     endpoint = payload.get("endpoint") or "auth"
     if endpoint == "rtagns":
         return {"strarr": ["email", "tel", "keycloak"]}
     if endpoint == "checkunique":
         return {"boolval": True}
-    if endpoint == "auth":
-        return await _handle_auth(payload)
-    if endpoint == "link":
-        return await _handle_link(payload)
-    if endpoint in {"add", "upd", "del", "gen"}:
+    try:
+        if endpoint == "auth":
+            return await _handle_auth(payload)
+        if endpoint == "link":
+            return await _handle_link(payload)
+        if endpoint in {"add", "upd", "del", "gen"}:
+            return {"err": "unsupported"}
         return {"err": "unsupported"}
-    return {"err": "unsupported"}
+    finally:
+        metrics_registry.increment("tinode_rest_auth_total", endpoint=endpoint)
+        metrics_registry.observe_total(
+            "tinode_rest_auth_duration_seconds",
+            duration_seconds=time.perf_counter() - started,
+            endpoint=endpoint,
+        )
 
 
 async def _handle_auth(payload: dict[str, Any]) -> dict[str, Any]:

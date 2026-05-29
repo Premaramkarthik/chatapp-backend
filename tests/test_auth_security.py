@@ -21,7 +21,7 @@ from domains.auth.signup_security import (
     normalize_email,
     request_hash,
 )
-from domains.users.entities.user import AccountMode
+from domains.users.user import AccountMode
 
 
 def test_pkce_challenge_is_stable_and_not_plaintext() -> None:

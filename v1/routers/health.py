@@ -8,6 +8,7 @@ from core.observability.metrics import metrics_registry
 from infrastructure.database.connection import call_json_function
 from infrastructure.keycloak.adapter import keycloak_verifier
 from infrastructure.meilisearch.health import health as meilisearch_health
+from infrastructure.tinode.health import health as tinode_health
 
 router = APIRouter(tags=["health"])
 
@@ -25,12 +26,11 @@ async def ready(response: Response) -> dict:
         "database": await _check_database(),
         "keycloak": (await keycloak_verifier.health()).__dict__,
         "meilisearch": (await meilisearch_health()).__dict__,
-        "tinode": {
-            "ok": settings.tinode.enabled,
-            "detail": "configured" if settings.tinode.enabled else "disabled",
-        },
+        "tinode": (await tinode_health()).__dict__,
     }
-    ok = all(check["ok"] for check in checks.values())
+    ok = all(
+        check["ok"] for name, check in checks.items() if name != "tinode" or settings.tinode.enabled
+    )
     if not ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return {"status": "ok" if ok else "degraded", "checks": checks}

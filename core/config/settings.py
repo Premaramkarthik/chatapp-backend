@@ -390,6 +390,11 @@ class TinodeSettings(EnvSettings):
         True,
         alias="TINODE_AUTH_ALLOW_PLAINTEXT_DEV_SECRET",
     )
+    grpc_required: bool = Field(False, alias="TINODE_GRPC_REQUIRED")
+    auto_provision_on_accept: bool = Field(
+        False,
+        alias="TINODE_AUTO_PROVISION_ON_ACCEPT",
+    )
 
     @property
     def api_key_value(self) -> str:
