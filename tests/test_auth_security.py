@@ -1,16 +1,19 @@
 """Auth security helper tests."""
 
-from v1.models.user import AccountMode
-from v1.services.auth.anomaly import AuthRiskLevel, classify_device_change, classify_refresh_failure
-from v1.services.auth.models import AuthSessionStatus
-from v1.services.auth.security import (
+from domains.auth.anomaly import (
+    AuthRiskLevel,
+    classify_device_change,
+    classify_refresh_failure,
+)
+from domains.auth.models import AuthSessionStatus
+from domains.auth.security import (
     TokenCipher,
     create_pkce_challenge,
     create_pkce_verifier,
     hash_secret,
 )
-from v1.services.auth.service import transition_session_status
-from v1.services.auth.signup_security import (
+from domains.auth.service import transition_session_status
+from domains.auth.signup_security import (
     AccountLinkDecision,
     decide_account_linking,
     email_domain,
@@ -18,6 +21,7 @@ from v1.services.auth.signup_security import (
     normalize_email,
     request_hash,
 )
+from domains.users.entities.user import AccountMode
 
 
 def test_pkce_challenge_is_stable_and_not_plaintext() -> None:

@@ -11,8 +11,8 @@ from typing import Protocol
 from fastapi import HTTPException, status
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from infrastructure.redis.cache import auth_redis_cache
 from v1.middleware.state import RATE_LIMIT_STATE_KEY, ensure_state
-from v1.utils.redis_cache import auth_redis_cache
 
 
 @dataclass(frozen=True)

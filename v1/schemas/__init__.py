@@ -1,1 +1,1 @@
-"""API and domain models."""
+"""API request and response schemas."""

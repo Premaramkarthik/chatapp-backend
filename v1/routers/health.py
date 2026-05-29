@@ -3,11 +3,11 @@
 from fastapi import APIRouter, Response, status
 from fastapi.responses import PlainTextResponse
 
-from v1.core.settings import settings
-from v1.database.connection import call_json_function
-from v1.utils.keyclock_adapter import keycloak_verifier
-from v1.utils.Meilisearch_health import health as meilisearch_health
-from v1.utils.metrics import metrics_registry
+from core.config.settings import settings
+from core.observability.metrics import metrics_registry
+from infrastructure.database.connection import call_json_function
+from infrastructure.keycloak.adapter import keycloak_verifier
+from infrastructure.meilisearch.health import health as meilisearch_health
 
 router = APIRouter(tags=["health"])
 

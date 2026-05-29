@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
-from v1.core.settings import settings
+from core.config.settings import settings
 
 UNSAFE_METHODS = {"POST", "PUT", "PATCH", "DELETE"}
 

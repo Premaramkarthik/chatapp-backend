@@ -4,13 +4,13 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
-from v1.database.repositories import PostgresUserRepository
+from domains.users.entities.user import BootstrapUserCommand
+from domains.users.use_cases.bootstrap_user import BootstrapUser
+from infrastructure.database.repositories import PostgresUserRepository
 from v1.dependencies.auth import get_current_principal, require_capability
 from v1.dependencies.container import get_bootstrap_user_use_case
-from v1.models.user import BootstrapUserCommand
 from v1.schemas.principal import KeycloakPrincipal
 from v1.schemas.users import AccountModeUpdateRequest, UserResponse
-from v1.services.users.bootstrap_user import BootstrapUser
 
 router = APIRouter(prefix="/v1", tags=["users"])
 CurrentPrincipal = Annotated[KeycloakPrincipal, Depends(get_current_principal)]

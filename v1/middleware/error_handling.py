@@ -6,15 +6,15 @@ from fastapi import HTTPException, status
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
+from core.logging.logger import get_logger
 from v1.middleware.state import REQUEST_ID_STATE_KEY, state_value
-from v1.utils.exception import (
+from v1.utils.base import (
     AppError,
     AuthenticationError,
     AuthorizationError,
     DatabaseError,
     IntegrationError,
 )
-from v1.utils.logger import get_logger
 
 logger = get_logger(__name__)
 

@@ -6,7 +6,7 @@ from typing import Any
 
 import pytest
 
-from v1.utils import tinode_rest_authenticator as tinode_auth
+from infrastructure.tinode import rest_auth as tinode_auth
 
 
 @pytest.mark.asyncio

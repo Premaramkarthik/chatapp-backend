@@ -2,12 +2,12 @@
 
 from fastapi import APIRouter, Header, HTTPException, Query, status
 
-from v1.schemas.auth import TinodeAuthRequest, TinodeAuthResponse
-from v1.utils.exception import TinodeAuthError
-from v1.utils.tinode_rest_authenticator import (
+from infrastructure.tinode.rest_auth import (
     handle_tinode_request,
     verify_shared_secret,
 )
+from v1.schemas.auth import TinodeAuthRequest, TinodeAuthResponse
+from v1.utils.base import TinodeAuthError
 
 router = APIRouter(prefix="/internal", tags=["internal"])
 

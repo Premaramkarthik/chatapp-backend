@@ -2,7 +2,7 @@
 
 from fastapi import FastAPI
 
-from v1.core.settings import settings
+from core.config.settings import settings
 from v1.middleware.authentication import JWTAuthenticationMiddleware
 from v1.middleware.cors import add_cors_middleware
 from v1.middleware.database import DatabaseSessionMiddleware

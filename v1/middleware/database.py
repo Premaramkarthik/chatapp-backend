@@ -4,8 +4,8 @@ from __future__ import annotations
 
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from v1.core.settings import settings
-from v1.database.connection import get_pool
+from core.config.settings import settings
+from infrastructure.database.connection import get_pool
 from v1.middleware.state import DB_CONNECTION_STATE_KEY, ensure_state
 
 

@@ -4,10 +4,10 @@ from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
-from app import app
+from domains.auth.models import SignupResult
+from domains.auth.service import SigninStartResult
+from main import app
 from v1.dependencies.container import get_auth_service
-from v1.services.auth.models import SignupResult
-from v1.services.auth.service import SigninStartResult
 
 
 class FakeAuthService:

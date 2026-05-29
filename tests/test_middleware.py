@@ -2,8 +2,8 @@
 
 import pytest
 
+from infrastructure.redis.cache import InMemoryRedisFallback
 from v1.middleware.rate_limit import InMemoryRateLimitStore
-from v1.utils.redis_cache import InMemoryRedisFallback
 
 
 @pytest.mark.asyncio

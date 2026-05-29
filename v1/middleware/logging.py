@@ -8,14 +8,14 @@ from typing import Any
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from core.logging.logger import get_logger
+from core.observability.metrics import metrics_registry
 from v1.middleware.state import (
     REQUEST_ID_STATE_KEY,
     START_TIME_STATE_KEY,
     ensure_state,
     state_value,
 )
-from v1.utils.logger import get_logger
-from v1.utils.metrics import metrics_registry
 
 logger = get_logger(__name__)
 

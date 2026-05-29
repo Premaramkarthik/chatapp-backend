@@ -1,6 +1,6 @@
 """Keycloak helper tests."""
 
-from v1.utils.keyclock_adapter import _extract_roles
+from infrastructure.keycloak.adapter import _extract_roles
 
 
 def test_extract_roles_from_realm_and_clients() -> None:

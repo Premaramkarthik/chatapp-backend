@@ -7,7 +7,8 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 
-from v1.core.settings import settings
+from core.config.settings import settings
+from domains.auth import AuthService, AuthSession
 from v1.dependencies.auth import (
     get_current_auth_session,
     get_current_principal,
@@ -29,7 +30,6 @@ from v1.schemas.auth_bff import (
     SocialSignupStartRequest,
 )
 from v1.schemas.principal import KeycloakPrincipal
-from v1.services.auth import AuthService, AuthSession
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 

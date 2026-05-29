@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
-from v1.database.repositories import PostgresUserRepository
-from v1.services.auth import AuthService
-from v1.services.users.bootstrap_user import BootstrapUser
+from domains.auth import AuthService
+from domains.users.use_cases.bootstrap_user import BootstrapUser
+from infrastructure.database.repositories import PostgresUserRepository
 
 
 async def get_bootstrap_user_use_case() -> BootstrapUser:

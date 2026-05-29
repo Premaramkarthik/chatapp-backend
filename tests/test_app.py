@@ -2,7 +2,7 @@
 
 from fastapi.testclient import TestClient
 
-from v1.app import app
+from main import app
 
 
 def test_live_health() -> None:

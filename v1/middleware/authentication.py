@@ -6,11 +6,15 @@ from fastapi import HTTPException, status
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from v1.core.settings import settings
-from v1.middleware.state import AUTH_SESSION_STATE_KEY, PRINCIPAL_STATE_KEY, ensure_state
-from v1.services.auth.session_resolver import auth_session_resolver
-from v1.utils.exception import AuthenticationError
-from v1.utils.keyclock_adapter import keycloak_verifier
+from core.config.settings import settings
+from domains.auth.session_resolver import auth_session_resolver
+from infrastructure.keycloak.adapter import keycloak_verifier
+from v1.middleware.state import (
+    AUTH_SESSION_STATE_KEY,
+    PRINCIPAL_STATE_KEY,
+    ensure_state,
+)
+from v1.utils.base import AuthenticationError
 
 
 class JWTAuthenticationMiddleware:

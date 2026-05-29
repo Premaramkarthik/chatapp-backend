@@ -8,10 +8,10 @@ from typing import Annotated
 from fastapi import Depends, HTTPException, Request, Security, status
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 
+from domains.auth.models import AuthSession
+from infrastructure.keycloak.adapter import keycloak_verifier
 from v1.middleware.state import AUTH_SESSION_STATE_KEY, PRINCIPAL_STATE_KEY
 from v1.schemas.principal import KeycloakPrincipal
-from v1.services.auth.models import AuthSession
-from v1.utils.keyclock_adapter import keycloak_verifier
 
 bearer_scheme = HTTPBearer(auto_error=False)
 BearerCredentials = Annotated[HTTPAuthorizationCredentials | None, Security(bearer_scheme)]
