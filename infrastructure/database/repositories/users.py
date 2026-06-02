@@ -49,8 +49,8 @@ class PostgresUserRepository(UserRepository):
         self,
         *,
         email: str,
-        display_name: str,
-        account_mode: str,
+        display_name: str | None = None,
+        account_mode: str | None = None,
         created_via: str,
     ) -> User:
         """Create or return a pending signup user before calling Keycloak."""
@@ -59,12 +59,31 @@ class PostgresUserRepository(UserRepository):
             7,
             {
                 "email": email,
-                "display_name": display_name,
-                "account_mode": account_mode,
+                "display_name": display_name or "",
+                "account_mode": account_mode or "",
                 "created_via": created_via,
             },
         )
         return User.from_mapping(row)
+
+    async def complete_signup_profile(
+        self,
+        *,
+        user_id: str,
+        display_name: str,
+        account_mode: str,
+    ) -> User | None:
+        """Complete signup profile fields for a pending user."""
+        row = await call_json_function(
+            "fn_users",
+            12,
+            {
+                "user_id": user_id,
+                "display_name": display_name,
+                "account_mode": account_mode,
+            },
+        )
+        return None if row is None else User.from_mapping(row)
 
     async def link_keycloak_subject(self, *, user_id: str, keycloak_sub: str) -> User:
         """Link a pending user to a Keycloak subject."""

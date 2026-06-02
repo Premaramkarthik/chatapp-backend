@@ -78,6 +78,37 @@ class SignupResult:
 
 
 @dataclass(frozen=True, slots=True)
+class SignupStartResult:
+    """Result returned after signup step 1."""
+
+    status: str = "accepted"
+    next_step: str = "complete_profile"
+    signup_token: str | None = None
+    expires_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class SignupCompleteResult:
+    """Result returned after signup step 2."""
+
+    status: str = "ok"
+    next_step: str = "verify_email"
+
+
+@dataclass(frozen=True, slots=True)
+class SignupSession:
+    """Opaque signup session bound to a pending user."""
+
+    id: str
+    user_id: str
+    token_hash: str
+    step_completed: int
+    expires_at: datetime
+    revoked_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class AuthSession:
     """Server-side BFF session snapshot."""
 

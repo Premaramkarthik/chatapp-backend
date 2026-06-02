@@ -61,7 +61,8 @@ class MiddlewareSettings(EnvSettings):
     auth_public_paths_raw: str = Field(
         "/health/live,/health/ready,/metrics,/docs,/redoc,/openapi.json,/v1/system/version,"
         "/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/forgot-password,"
-        "/v1/auth/signup,/v1/auth/signup/resend,/v1/auth/signup/social/start",
+        "/v1/auth/signup,/v1/auth/signup/start,/v1/auth/signup/complete,"
+        "/v1/auth/signup/resend,/v1/auth/signup/social/start",
         alias="MIDDLEWARE_AUTH_PUBLIC_PATHS",
     )
     auth_public_prefixes_raw: str = Field("/internal", alias="MIDDLEWARE_AUTH_PUBLIC_PREFIXES")
@@ -87,7 +88,8 @@ class MiddlewareSettings(EnvSettings):
     csrf_excluded_paths_raw: str = Field(
         "/health/live,/health/ready,/metrics,/docs,/redoc,/openapi.json,/v1/system/version,"
         "/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/forgot-password,"
-        "/v1/auth/signup,/v1/auth/signup/resend,/v1/auth/signup/social/start,"
+        "/v1/auth/signup,/v1/auth/signup/start,/v1/auth/signup/complete,"
+        "/v1/auth/signup/resend,/v1/auth/signup/social/start,"
         "/internal/tinode/auth",
         alias="MIDDLEWARE_CSRF_EXCLUDED_PATHS",
     )
@@ -330,6 +332,21 @@ class AuthSettings(EnvSettings):
     signup_social_ip_window_sec: int = Field(60, alias="AUTH_SIGNUP_SOCIAL_IP_WINDOW_SEC")
     signup_resend_cooldown_sec: int = Field(300, alias="AUTH_SIGNUP_RESEND_COOLDOWN_SEC")
     signup_max_verification_sends: int = Field(5, alias="AUTH_SIGNUP_MAX_VERIFICATION_SENDS")
+    signup_session_ttl_sec: int = Field(1800, alias="AUTH_SIGNUP_SESSION_TTL_SEC")
+    verification_reconcile_enabled: bool = Field(
+        True,
+        alias="AUTH_VERIFICATION_RECONCILE_ENABLED",
+    )
+    verification_reconcile_interval_sec: float = Field(
+        300,
+        alias="AUTH_VERIFICATION_RECONCILE_INTERVAL_SEC",
+    )
+    verification_reconcile_batch_size: int = Field(
+        50,
+        alias="AUTH_VERIFICATION_RECONCILE_BATCH_SIZE",
+    )
+    signup_min_password_length: int = Field(12, alias="AUTH_SIGNUP_MIN_PASSWORD_LENGTH")
+    signup_max_password_length: int = Field(128, alias="AUTH_SIGNUP_MAX_PASSWORD_LENGTH")
     blocked_email_domains_raw: str = Field(
         "tempmail.com,guerrillamail.com,10minutemail.com",
         alias="AUTH_BLOCKED_EMAIL_DOMAINS",

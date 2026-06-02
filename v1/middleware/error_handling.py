@@ -7,6 +7,7 @@ from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from core.logging.logger import get_logger
+from domains.auth.password_policy import PasswordPolicyError
 from v1.middleware.state import REQUEST_ID_STATE_KEY, state_value
 from v1.utils.base import (
     AppError,
@@ -108,6 +109,8 @@ class ErrorHandlingMiddleware:
 
 
 def _status_for_app_error(exc: AppError) -> int:
+    if isinstance(exc, PasswordPolicyError):
+        return status.HTTP_422_UNPROCESSABLE_CONTENT
     if isinstance(exc, AuthenticationError):
         return status.HTTP_401_UNAUTHORIZED
     if isinstance(exc, AuthorizationError):

@@ -53,7 +53,7 @@ class User:
     email: str | None
     display_name: str | None
     status: str
-    account_mode: str = AccountMode.MESSENGER.value
+    account_mode: str | None = None
     email_verified: bool = False
     created_via: str = CreatedVia.EMAIL.value
     last_verification_sent_at: datetime | str | None = None
@@ -72,7 +72,7 @@ class User:
             email=data.get("email"),
             display_name=data.get("display_name"),
             status=str(data.get("status", "active")),
-            account_mode=str(data.get("account_mode", AccountMode.MESSENGER.value)),
+            account_mode=data.get("account_mode"),
             email_verified=bool(data.get("email_verified", False)),
             created_via=str(data.get("created_via", CreatedVia.EMAIL.value)),
             last_verification_sent_at=data.get("last_verification_sent_at"),

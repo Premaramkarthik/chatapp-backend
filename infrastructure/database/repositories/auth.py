@@ -12,9 +12,10 @@ from domains.auth.models import (
     AuthSessionStatus,
     SessionView,
     SigninState,
+    SignupSession,
 )
 from domains.auth.security import now_utc
-from infrastructure.database.connection import execute, fetch, fetchrow
+from infrastructure.database.connection import call_json_function, execute, fetch, fetchrow
 
 
 class PostgresAuthRepository:
@@ -399,6 +400,47 @@ class PostgresAuthRepository:
               AND (idle_expires_at <= now() OR max_expires_at <= now())
             """
         )
+
+    async def create_signup_session(
+        self,
+        *,
+        user_id: str,
+        token_hash: str,
+        expires_at: datetime,
+    ) -> SignupSession:
+        """Persist a signup session token hash for step 2 completion."""
+        row = await call_json_function(
+            "fn_signup_sessions",
+            1,
+            {
+                "user_id": user_id,
+                "token_hash": token_hash,
+                "expires_at": expires_at.isoformat(),
+            },
+        )
+        return _signup_session_from_mapping(row)
+
+    async def resolve_signup_session(self, *, token_hash: str) -> SignupSession | None:
+        """Return an active signup session for the given token hash."""
+        row = await call_json_function("fn_signup_sessions", 2, {"token_hash": token_hash})
+        return None if row is None else _signup_session_from_mapping(row)
+
+    async def complete_signup_session(self, *, session_id: str) -> SignupSession | None:
+        """Mark a signup session complete after profile step."""
+        row = await call_json_function("fn_signup_sessions", 3, {"session_id": session_id})
+        return None if row is None else _signup_session_from_mapping(row)
+
+
+def _signup_session_from_mapping(data: dict) -> SignupSession:
+    return SignupSession(
+        id=str(data["id"]),
+        user_id=str(data["user_id"]),
+        token_hash=str(data["token_hash"]),
+        step_completed=int(data["step_completed"]),
+        expires_at=data["expires_at"],
+        revoked_at=data.get("revoked_at"),
+        created_at=data.get("created_at"),
+    )
 
 
 def _signin_state_from_record(row: Record | None) -> SigninState:

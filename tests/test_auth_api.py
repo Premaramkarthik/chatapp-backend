@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
 
-from domains.auth.models import SignupResult
+from domains.auth.models import SignupCompleteResult, SignupResult, SignupStartResult
 from domains.auth.service import SigninStartResult
 from main import app
 from v1.dependencies.container import get_auth_service
@@ -21,18 +21,30 @@ class FakeAuthService:
     async def forgot_password(self, *, email: str, request) -> None:
         return None
 
-    async def signup(
+    async def signup_start(
         self,
         *,
         email,
-        display_name,
-        account_mode,
+        password,
         device_fingerprint,
         captcha_token,
         idempotency_key,
         request,
     ):
-        return SignupResult()
+        return SignupStartResult(
+            signup_token="signup-token-abc",
+            expires_at=datetime(2026, 1, 1, tzinfo=UTC),
+        )
+
+    async def signup_complete(
+        self,
+        *,
+        signup_token,
+        display_name,
+        account_mode,
+        request,
+    ):
+        return SignupCompleteResult()
 
     async def resend_signup_email(self, *, email: str, request):
         return SignupResult()
@@ -81,16 +93,31 @@ def test_forgot_password_response_is_generic() -> None:
     assert response.json() == {"status": "ok"}
 
 
-def test_signup_requires_idempotency_key() -> None:
+def test_signup_is_deprecated() -> None:
+    with TestClient(app) as client:
+        response = client.post(
+            "/v1/auth/signup",
+            headers={"Idempotency-Key": "signup-key-1"},
+            json={
+                "email": "user@example.com",
+                "display_name": "User Example",
+                "account_mode": "both",
+                "device_fingerprint": "device-12345",
+            },
+        )
+
+    assert response.status_code == 410
+
+
+def test_signup_start_requires_idempotency_key() -> None:
     app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
     try:
         with TestClient(app) as client:
             response = client.post(
-                "/v1/auth/signup",
+                "/v1/auth/signup/start",
                 json={
                     "email": "user@example.com",
-                    "display_name": "User Example",
-                    "account_mode": "traveler",
+                    "password": "SecurePassw0rd!12",
                     "device_fingerprint": "device-12345",
                 },
             )
@@ -100,17 +127,16 @@ def test_signup_requires_idempotency_key() -> None:
     assert response.status_code == 400
 
 
-def test_signup_returns_generic_accepted_response() -> None:
+def test_signup_start_returns_signup_token() -> None:
     app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
     try:
         with TestClient(app) as client:
             response = client.post(
-                "/v1/auth/signup",
+                "/v1/auth/signup/start",
                 headers={"Idempotency-Key": "signup-key-1"},
                 json={
                     "email": "user@example.com",
-                    "display_name": "User Example",
-                    "account_mode": "both",
+                    "password": "SecurePassw0rd!12",
                     "device_fingerprint": "device-12345",
                 },
             )
@@ -118,7 +144,27 @@ def test_signup_returns_generic_accepted_response() -> None:
         app.dependency_overrides.clear()
 
     assert response.status_code == 202
-    assert response.json() == {"status": "accepted", "next_step": "check_email"}
+    assert response.json()["signup_token"] == "signup-token-abc"
+    assert response.json()["next_step"] == "complete_profile"
+
+
+def test_signup_complete_returns_verify_email_step() -> None:
+    app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/auth/signup/complete",
+                json={
+                    "signup_token": "signup-token-abc",
+                    "display_name": "User Example",
+                    "account_mode": "both",
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "next_step": "verify_email"}
 
 
 def test_social_signup_start_returns_idp_authorization_url() -> None:

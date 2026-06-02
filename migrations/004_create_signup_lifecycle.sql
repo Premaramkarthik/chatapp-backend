@@ -103,6 +103,65 @@ CREATE INDEX IF NOT EXISTS idx_auth_outbox_events_unpublished
 ON auth_outbox_events(created_at)
 WHERE published_at IS NULL;
 
+CREATE TABLE IF NOT EXISTS signup_sessions (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    step_completed INT NOT NULL DEFAULT 1 CHECK (step_completed IN (1, 2)),
+    expires_at TIMESTAMPTZ NOT NULL,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS idx_signup_sessions_user_id ON signup_sessions(user_id);
+CREATE INDEX IF NOT EXISTS idx_signup_sessions_expires_at ON signup_sessions(expires_at);
+CREATE INDEX IF NOT EXISTS idx_signup_sessions_active
+ON signup_sessions(token_hash)
+WHERE revoked_at IS NULL;
+
+CREATE OR REPLACE FUNCTION fn_signup_sessions(mode INT, payload JSONB DEFAULT '{}'::jsonb)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    result signup_sessions%ROWTYPE;
+BEGIN
+    IF mode = 1 THEN
+        INSERT INTO signup_sessions (user_id, token_hash, expires_at)
+        VALUES (
+            (payload->>'user_id')::uuid,
+            payload->>'token_hash',
+            (payload->>'expires_at')::timestamptz
+        )
+        RETURNING * INTO result;
+
+        RETURN to_jsonb(result);
+
+    ELSIF mode = 2 THEN
+        SELECT * INTO result
+        FROM signup_sessions
+        WHERE token_hash = payload->>'token_hash'
+          AND revoked_at IS NULL
+          AND expires_at > now()
+        LIMIT 1;
+
+        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
+
+    ELSIF mode = 3 THEN
+        UPDATE signup_sessions
+        SET step_completed = 2,
+            revoked_at = now()
+        WHERE id = (payload->>'session_id')::uuid
+          AND revoked_at IS NULL
+        RETURNING * INTO result;
+
+        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
+    END IF;
+
+    RAISE EXCEPTION 'fn_signup_sessions unknown mode: %', mode;
+END;
+$$;
+
 CREATE OR REPLACE FUNCTION fn_users(mode INT, payload JSONB DEFAULT '{}'::jsonb)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -186,8 +245,8 @@ BEGIN
         )
         VALUES (
             lower(payload->>'email'),
-            payload->>'display_name',
-            payload->>'account_mode',
+            NULLIF(payload->>'display_name', ''),
+            NULLIF(payload->>'account_mode', ''),
             'pending_verification',
             payload->>'created_via',
             false
@@ -225,6 +284,19 @@ BEGIN
             RETURN NULL;
         END IF;
 
+        SELECT * INTO result
+        FROM users
+        WHERE keycloak_sub = payload->>'keycloak_sub'
+          AND lower(email) = lower(payload->>'email')
+          AND status = 'pending_verification'
+        LIMIT 1;
+
+        IF result.id IS NULL
+           OR result.display_name IS NULL
+           OR result.account_mode IS NULL THEN
+            RETURN NULL;
+        END IF;
+
         UPDATE users
         SET
             status = CASE
@@ -232,17 +304,34 @@ BEGIN
                 ELSE 'active'
             END,
             email_verified = true
-        WHERE keycloak_sub = payload->>'keycloak_sub'
-          AND lower(email) = lower(payload->>'email')
-          AND status = 'pending_verification'
+        WHERE id = result.id
         RETURNING * INTO result;
 
-        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
+        RETURN to_jsonb(result);
 
     ELSIF mode = 11 THEN
         UPDATE users
         SET status = 'restricted'
         WHERE id = (payload->>'user_id')::uuid
+        RETURNING * INTO result;
+
+        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
+
+    ELSIF mode = 12 THEN
+        IF NULLIF(payload->>'display_name', '') IS NULL THEN
+            RAISE EXCEPTION 'display_name is required';
+        END IF;
+        IF payload->>'account_mode' NOT IN ('traveler', 'messenger', 'both') THEN
+            RAISE EXCEPTION 'invalid account_mode';
+        END IF;
+
+        UPDATE users
+        SET
+            display_name = payload->>'display_name',
+            account_mode = payload->>'account_mode',
+            onboarding_completed_at = now()
+        WHERE id = (payload->>'user_id')::uuid
+          AND status = 'pending_verification'
         RETURNING * INTO result;
 
         RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;

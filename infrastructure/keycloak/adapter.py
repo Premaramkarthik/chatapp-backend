@@ -57,10 +57,16 @@ class KeycloakVerifier:
             raise AuthenticationError("Invalid authentication token") from exc
 
         roles = _extract_roles(claims)
+        email_verified = bool(claims.get("email_verified", False))
+        logger.debug(
+            "keycloak_token_verified sub={} email_verified={}",
+            claims.get("sub"),
+            email_verified,
+        )
         return KeycloakPrincipal(
             sub=str(claims["sub"]),
             email=claims.get("email"),
-            email_verified=bool(claims.get("email_verified", False)),
+            email_verified=email_verified,
             display_name=claims.get("name"),
             preferred_username=claims.get("preferred_username"),
             identity_provider=claims.get("identity_provider") or claims.get("idp"),

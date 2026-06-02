@@ -39,6 +39,10 @@ target-version = ["py313"]
 asyncio_mode = "auto"
 pythonpath = ["."]
 testpaths = ["tests"]
+markers = [
+    "integration: real Postgres + Keycloak (docker-compose required)",
+    "e2e: full SMTP + email verification (Gmail creds required)",
+]
 
 [tool.ruff]
 line-length = 100

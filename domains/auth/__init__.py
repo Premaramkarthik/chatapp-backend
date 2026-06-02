@@ -1,6 +1,7 @@
 """Authentication service exports."""
 
 from domains.auth.models import AuthSession, AuthSessionStatus
+from domains.auth.service import AuthService
 
 __all__ = [
     "AuthService",
@@ -13,11 +14,7 @@ __all__ = [
 
 
 def __getattr__(name: str):
-    """Lazy imports to avoid circular dependency with repository adapters."""
-    if name == "AuthService":
-        from domains.auth.service import AuthService
-
-        return AuthService
+    """Lazy imports for resolver singletons."""
     if name == "auth_service":
         from domains.auth.service import auth_service
 

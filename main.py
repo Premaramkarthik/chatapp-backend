@@ -9,6 +9,7 @@ from fastapi import FastAPI
 from core.config.settings import settings
 from core.logging.logger import setup_logger
 from domains.auth.jwks import jwks_refresh_manager
+from domains.auth.verification_reconcile import run_verification_reconcile_loop
 from domains.search.outbox_worker import run_search_outbox_loop
 from infrastructure.database.connection import close_db, init_db
 from infrastructure.meilisearch.client import get_meilisearch_client
@@ -28,6 +29,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     )
     outbox_stop = asyncio.Event()
     outbox_task: asyncio.Task[None] | None = None
+    reconcile_stop = asyncio.Event()
+    reconcile_task: asyncio.Task[None] | None = None
     if not settings.app.skip_startup_integrations:
         await init_db()
         jwks_refresh_manager.start()
@@ -39,14 +42,25 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
                 settings.meilisearch.traveler_index,
             )
             outbox_task = asyncio.create_task(run_search_outbox_loop(outbox_stop))
+        if settings.auth.verification_reconcile_enabled:
+            reconcile_task = asyncio.create_task(
+                run_verification_reconcile_loop(reconcile_stop),
+            )
     try:
         yield
     finally:
         outbox_stop.set()
+        reconcile_stop.set()
         if outbox_task is not None:
             outbox_task.cancel()
             try:
                 await outbox_task
+            except asyncio.CancelledError:
+                pass
+        if reconcile_task is not None:
+            reconcile_task.cancel()
+            try:
+                await reconcile_task
             except asyncio.CancelledError:
                 pass
         await jwks_refresh_manager.stop()

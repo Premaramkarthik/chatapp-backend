@@ -1,17 +1,22 @@
 ALTER TABLE users
-ADD COLUMN IF NOT EXISTS account_mode TEXT NOT NULL DEFAULT 'messenger';
+ADD COLUMN IF NOT EXISTS account_mode TEXT;
 
 DO $$
 BEGIN
-    IF NOT EXISTS (
+    IF EXISTS (
         SELECT 1
         FROM pg_constraint
         WHERE conname = 'users_account_mode_check'
     ) THEN
-        ALTER TABLE users
-        ADD CONSTRAINT users_account_mode_check
-        CHECK (account_mode IN ('traveler', 'messenger', 'both'));
+        ALTER TABLE users DROP CONSTRAINT users_account_mode_check;
     END IF;
+
+    ALTER TABLE users
+    ADD CONSTRAINT users_account_mode_check
+    CHECK (
+        account_mode IS NULL
+        OR account_mode IN ('traveler', 'messenger', 'both')
+    );
 END;
 $$;
 

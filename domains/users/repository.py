@@ -30,8 +30,8 @@ class UserRepository(Protocol):
         self,
         *,
         email: str,
-        display_name: str,
-        account_mode: str,
+        display_name: str | None = None,
+        account_mode: str | None = None,
         created_via: str,
     ) -> User:
         """Create or return a pending signup user."""
@@ -62,4 +62,14 @@ class UserRepository(Protocol):
 
     async def mark_restricted(self, *, user_id: str) -> User:
         """Restrict a local user after an unrecoverable signup orchestration failure."""
+        ...
+
+    async def complete_signup_profile(
+        self,
+        *,
+        user_id: str,
+        display_name: str,
+        account_mode: str,
+    ) -> User | None:
+        """Complete signup profile fields for a pending user."""
         ...

@@ -25,8 +25,12 @@ from v1.schemas.auth_bff import (
     SigninStartRequest,
     SigninStartResponse,
     SignupAcceptedResponse,
+    SignupCompleteRequest,
+    SignupCompleteResponse,
     SignupRequest,
     SignupResendRequest,
+    SignupStartRequest,
+    SignupStartResponse,
     SocialSignupStartRequest,
 )
 from v1.schemas.principal import KeycloakPrincipal
@@ -57,29 +61,64 @@ async def signin_start(
     )
 
 
-@router.post("/signup", response_model=SignupAcceptedResponse, status_code=202)
-async def signup(
-    payload: SignupRequest,
+@router.post("/signup/start", response_model=SignupStartResponse, status_code=202)
+async def signup_start(
+    payload: SignupStartRequest,
     request: Request,
     auth_service: AuthServiceDependency,
-) -> SignupAcceptedResponse:
-    """Create a pending account and send Keycloak setup email."""
+) -> SignupStartResponse:
+    """Create a pending account, set password in Keycloak, and send verify-only email."""
     idempotency_key = request.headers.get("Idempotency-Key")
     if not idempotency_key:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Idempotency-Key header is required",
         )
-    result = await auth_service.signup(
+    result = await auth_service.signup_start(
         email=str(payload.email),
-        display_name=payload.display_name,
-        account_mode=payload.account_mode,
+        password=payload.password.get_secret_value(),
         device_fingerprint=payload.device_fingerprint,
         captcha_token=payload.captcha_token,
         idempotency_key=idempotency_key,
         request=request,
     )
-    return SignupAcceptedResponse(status=result.status, next_step=result.next_step)
+    return SignupStartResponse(
+        status=result.status,
+        next_step=result.next_step,
+        signup_token=result.signup_token,
+        expires_at=result.expires_at,
+    )
+
+
+@router.post("/signup/complete", response_model=SignupCompleteResponse)
+async def signup_complete(
+    payload: SignupCompleteRequest,
+    request: Request,
+    auth_service: AuthServiceDependency,
+) -> SignupCompleteResponse:
+    """Complete signup profile for a pending verification user."""
+    result = await auth_service.signup_complete(
+        signup_token=payload.signup_token,
+        display_name=payload.display_name,
+        account_mode=payload.account_mode,
+        request=request,
+    )
+    return SignupCompleteResponse(status=result.status, next_step=result.next_step)
+
+
+@router.post("/signup", status_code=410)
+async def signup(
+    _payload: SignupRequest,
+    _request: Request,
+) -> None:
+    """Deprecated single-step signup; use /signup/start and /signup/complete."""
+    raise HTTPException(
+        status_code=status.HTTP_410_GONE,
+        detail=(
+            "POST /v1/auth/signup is deprecated; use /v1/auth/signup/start "
+            "and /v1/auth/signup/complete"
+        ),
+    )
 
 
 @router.post("/signup/resend", response_model=SignupAcceptedResponse, status_code=202)
