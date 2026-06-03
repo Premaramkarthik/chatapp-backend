@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
-from core.observability.metrics import metrics_registry
+from core.observability.prometheus_metrics import TINODE_PROVISION_TOTAL
 from domains.chat.provision import ProvisionError, provision_conversation_for_connection
 from domains.chat.session import TinodeSessionNotReadyError, build_tinode_session
 from infrastructure.database.repositories.conversations import PostgresConversationRepository
@@ -140,9 +140,9 @@ async def provision_conversation(
             connection=connection,
             created_by_user_id=user["id"],
         )
-        metrics_registry.increment("tinode_provision_total", outcome="success")
+        TINODE_PROVISION_TOTAL.labels(outcome="success").inc()
     except ProvisionError as exc:
-        metrics_registry.increment("tinode_provision_total", outcome="failed")
+        TINODE_PROVISION_TOTAL.labels(outcome="failed").inc()
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),

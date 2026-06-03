@@ -8,6 +8,7 @@ import asyncpg
 
 from core.config.settings import settings
 from core.logging.logger import get_logger
+from core.observability.db_instrumentation import db_operation, update_pool_gauges
 from infrastructure.database.connection.pool_instrumentation import (
     close_pool_with_instrumentation,
     db_target_label,
@@ -243,28 +244,58 @@ def _json_decode(value: str) -> Any:
 
 async def fetchrow(query: str, *args: Any) -> asyncpg.Record | None:
     """Run a query and return one row."""
+    return await _fetchrow(query, *args)
+
+
+@db_operation("fetchrow")
+async def _fetchrow(query: str, *args: Any) -> asyncpg.Record | None:
     pool = await get_pool()
     async with pool.acquire() as connection:
+        update_pool_gauges(pool.raw_pool if hasattr(pool, "raw_pool") else pool)
         return await connection.fetchrow(query, *args)
 
 
 async def fetch(query: str, *args: Any) -> list[asyncpg.Record]:
     """Run a query and return all rows."""
+    return await _fetch(query, *args)
+
+
+@db_operation("fetch")
+async def _fetch(query: str, *args: Any) -> list[asyncpg.Record]:
     pool = await get_pool()
     async with pool.acquire() as connection:
+        update_pool_gauges(pool.raw_pool if hasattr(pool, "raw_pool") else pool)
         return list(await connection.fetch(query, *args))
 
 
 async def execute(query: str, *args: Any) -> str:
     """Run a statement and return asyncpg's status text."""
+    return await _execute(query, *args)
+
+
+@db_operation("execute")
+async def _execute(query: str, *args: Any) -> str:
     pool = await get_pool()
     async with pool.acquire() as connection:
+        update_pool_gauges(pool.raw_pool if hasattr(pool, "raw_pool") else pool)
         return await connection.execute(query, *args)
 
 
 async def call_json_function(function_name: str, mode: int, payload: dict[str, Any]) -> Any:
     """Call a mode-based JSONB stored function."""
-    row = await fetchrow(f"SELECT {function_name}($1, $2::jsonb) AS result", mode, payload)
+    return await _call_json_function(function_name, mode, payload)
+
+
+@db_operation("call_json_function")
+async def _call_json_function(function_name: str, mode: int, payload: dict[str, Any]) -> Any:
+    pool = await get_pool()
+    async with pool.acquire() as connection:
+        update_pool_gauges(pool.raw_pool if hasattr(pool, "raw_pool") else pool)
+        row = await connection.fetchrow(
+            f"SELECT {function_name}($1, $2::jsonb) AS result",
+            mode,
+            payload,
+        )
     if row is None:
         return None
     return row["result"]

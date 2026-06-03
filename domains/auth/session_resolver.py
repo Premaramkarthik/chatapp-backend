@@ -5,7 +5,7 @@ from __future__ import annotations
 from datetime import UTC, datetime, timedelta
 
 from core.config.settings import settings
-from core.observability.metrics import metrics_registry
+from core.observability.prometheus_metrics import AUTH_REFRESH_FAILURE_TOTAL
 from domains.auth.keycloak_client import keycloak_auth_client
 from domains.auth.models import AuthSession, AuthSessionStatus
 from domains.auth.security import TokenCipher, hash_secret
@@ -98,7 +98,7 @@ class AuthSessionResolver:
             )
             return updated or session
         except Exception:
-            metrics_registry.increment("auth_refresh_failure_total", reason="refresh_exception")
+            AUTH_REFRESH_FAILURE_TOTAL.labels(reason="refresh_exception").inc()
             await self._repository.mark_session_status(
                 session_id=session.id,
                 status=AuthSessionStatus.COMPROMISED,

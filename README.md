@@ -474,25 +474,60 @@ This implements the **Transactional Outbox pattern** ensuring eventual consisten
 
 ## Observability
 
+### Stack
+
+| Component | Purpose |
+|-----------|---------|
+| **Loguru + JSON** | Structured logs with `trace_id`, `request_id`, `correlation_id` |
+| **Prometheus** | Metrics via `prometheus-client` + `prometheus-fastapi-instrumentator` |
+| **OpenTelemetry** | Traces exported to Tempo (OTLP gRPC) |
+| **Grafana** | Dashboards linking metrics, logs, and traces |
+
+Start the observability profile (API must be running on host port 8000 for Prometheus scrape):
+
+```bash
+docker compose --profile observability up -d prometheus grafana loki promtail tempo cadvisor
+```
+
+| Service | URL |
+|---------|-----|
+| Grafana | http://localhost:3001 (admin / admin) |
+| Prometheus | http://localhost:9090 |
+| Tempo | OTLP gRPC localhost:4317 |
+| Loki | http://localhost:3100 |
+
+Configure the API for tracing and JSON logs:
+
+```bash
+LOG_JSON=true
+OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
+OTEL_SERVICE_NAME=chatapp-backend
+OTEL_TRACES_SAMPLER_ARG=0.1   # production: lower sample rate
+```
+
 ### Logging
 
-- **Library**: Loguru with structured format
-- **Console**: `{time} | {level} | {message}`
+- **Library**: Loguru with optional JSON serialization (`LOG_JSON=true`)
 - **File**: Rotating 100MB files, 30-day retention at `logs/backend.log`
-- **JSON mode**: `LOG_JSON=true` for log aggregation pipelines
-- **Request logging middleware**: Method, path, status, duration for every request
+- **Correlation**: `X-Request-ID` and optional `X-Correlation-ID` headers
+- **Trace linking**: OpenTelemetry injects `trace_id` / `span_id` into every log line
 
 ### Metrics (`/metrics`)
 
-Custom Prometheus-compatible text exposition:
+Prometheus exposition includes HTTP metrics (Instrumentator), auth counters (`signup_success_total`, `login_failure_total`), database histograms (`database_query_duration_seconds`), Keycloak metrics, and pool gauges.
 
+Example queries in Grafana or Prometheus:
+
+```promql
+rate(login_success_total[5m])
+histogram_quantile(0.95, sum(rate(database_query_duration_seconds_bucket[5m])) by (le))
+pending_verifications
 ```
-chatapp_http_requests_total{method="GET",path="/v1/me",status_class="2xx"} 142
-chatapp_http_request_duration_seconds_total{...} 1.234567
-chatapp_signup_total{outcome="success"} 23
-chatapp_tinode_provision_total{outcome="success"} 15
-chatapp_tinode_rest_auth_total{endpoint="auth"} 89
-chatapp_auth_redis_fallback_total{reason="ConnectionError"} 2
+
+Search logs by trace ID in Loki:
+
+```logql
+{job="chatapp-backend"} | json | trace_id="<trace-id-from-grafana>"
 ```
 
 ### Health Checks

@@ -43,6 +43,18 @@ class LoggingSettings(EnvSettings):
     json_logs: bool = Field(False, alias="LOG_JSON")
 
 
+class ObservabilitySettings(EnvSettings):
+    """OpenTelemetry, Prometheus, and structured logging settings."""
+
+    enabled: bool = Field(True, alias="OBSERVABILITY_ENABLED")
+    service_name: str = Field("chatapp-backend", alias="OTEL_SERVICE_NAME")
+    otlp_endpoint: str = Field("http://localhost:4317", alias="OTEL_EXPORTER_OTLP_ENDPOINT")
+    otlp_insecure: bool = Field(True, alias="OTEL_EXPORTER_OTLP_INSECURE")
+    traces_sample_rate: float = Field(1.0, alias="OTEL_TRACES_SAMPLER_ARG")
+    metrics_enabled: bool = Field(True, alias="OBSERVABILITY_METRICS_ENABLED")
+    correlation_header: str = Field("X-Correlation-ID", alias="OBSERVABILITY_CORRELATION_HEADER")
+
+
 class MiddlewareSettings(EnvSettings):
     """Cross-cutting HTTP middleware settings."""
 
@@ -444,6 +456,7 @@ class Settings:
     def __init__(self) -> None:
         self.app = AppSettings()
         self.logging = LoggingSettings()
+        self.observability = ObservabilitySettings()
         self.middleware = MiddlewareSettings()
         self.database = DatabaseSettings()
         self.keycloak = KeycloakSettings()

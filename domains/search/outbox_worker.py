@@ -6,6 +6,10 @@ import asyncio
 
 from core.config.settings import settings
 from core.logging.logger import get_logger
+from core.observability.prometheus_metrics import (
+    BACKGROUND_JOB_FAILURES_TOTAL,
+    BACKGROUND_JOB_RUNS_TOTAL,
+)
 from infrastructure.database.repositories.discovery import PostgresDiscoveryRepository
 from infrastructure.meilisearch.client import get_meilisearch_client
 from infrastructure.meilisearch.sync import delete_traveler, upsert_traveler
@@ -48,15 +52,21 @@ async def process_search_outbox_once(*, batch_size: int = 50) -> int:
 
 async def run_search_outbox_loop(stop_event: asyncio.Event, *, interval_sec: float = 5.0) -> None:
     """Background loop until stop_event is set."""
+    from opentelemetry import trace
+
+    tracer = trace.get_tracer(__name__)
     while not stop_event.is_set():
-        try:
-            processed = await process_search_outbox_once()
-            if processed == 0:
-                await asyncio.wait_for(stop_event.wait(), timeout=interval_sec)
-        except TimeoutError:
-            continue
-        except asyncio.CancelledError:
-            raise
-        except Exception as exc:
-            logger.warning("search outbox loop error: {}", exc)
-            await asyncio.sleep(interval_sec)
+        with tracer.start_as_current_span("background.search_outbox"):
+            try:
+                BACKGROUND_JOB_RUNS_TOTAL.labels(job="search_outbox").inc()
+                processed = await process_search_outbox_once()
+                if processed == 0:
+                    await asyncio.wait_for(stop_event.wait(), timeout=interval_sec)
+            except TimeoutError:
+                continue
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                BACKGROUND_JOB_FAILURES_TOTAL.labels(job="search_outbox").inc()
+                logger.warning("search outbox loop error: {}", exc)
+                await asyncio.sleep(interval_sec)

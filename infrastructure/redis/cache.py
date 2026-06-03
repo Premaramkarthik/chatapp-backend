@@ -10,7 +10,7 @@ from typing import Any
 
 from core.config.settings import settings
 from core.logging.logger import get_logger
-from core.observability.metrics import metrics_registry
+from core.observability.prometheus_metrics import AUTH_REDIS_FALLBACK_TOTAL
 
 logger = get_logger(__name__)
 
@@ -127,7 +127,7 @@ class AuthRedisCache:
             client = await self.client()
             return await client.get(key)
         except Exception as exc:
-            metrics_registry.increment("auth_redis_fallback_total", reason=type(exc).__name__)
+            AUTH_REDIS_FALLBACK_TOTAL.labels(reason=type(exc).__name__).inc()
             logger.warning("redis_get_failed key={} error_type={}", key, type(exc).__name__)
             return await self._fallback.get(key)
 
@@ -144,7 +144,7 @@ class AuthRedisCache:
             client = await self.client()
             return bool(await client.set(key, value, ex=ttl_sec, nx=nx))
         except Exception as exc:
-            metrics_registry.increment("auth_redis_fallback_total", reason=type(exc).__name__)
+            AUTH_REDIS_FALLBACK_TOTAL.labels(reason=type(exc).__name__).inc()
             logger.warning("redis_set_failed key={} error_type={}", key, type(exc).__name__)
             return await self._fallback.set(key, value, ex=ttl_sec, nx=nx)
 
@@ -165,7 +165,7 @@ class AuthRedisCache:
             client = await self.client()
             return int(await client.delete(*keys))
         except Exception as exc:
-            metrics_registry.increment("auth_redis_fallback_total", reason=type(exc).__name__)
+            AUTH_REDIS_FALLBACK_TOTAL.labels(reason=type(exc).__name__).inc()
             logger.warning("redis_delete_failed error_type={}", type(exc).__name__)
             return await self._fallback.delete(*keys)
 
@@ -178,7 +178,7 @@ class AuthRedisCache:
                 await client.expire(key, ttl_sec)
             return value
         except Exception as exc:
-            metrics_registry.increment("auth_redis_fallback_total", reason=type(exc).__name__)
+            AUTH_REDIS_FALLBACK_TOTAL.labels(reason=type(exc).__name__).inc()
             logger.warning("redis_increment_failed key={} error_type={}", key, type(exc).__name__)
             value = await self._fallback.incr(key)
             if value == 1:

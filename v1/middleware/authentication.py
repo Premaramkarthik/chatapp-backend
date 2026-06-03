@@ -7,6 +7,7 @@ from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Receive, Scope, Send
 
 from core.config.settings import settings
+from core.observability.logging_context import bind_request_context
 from domains.auth.session_resolver import auth_session_resolver
 from infrastructure.keycloak.adapter import keycloak_verifier
 from v1.middleware.state import (
@@ -72,6 +73,7 @@ class JWTAuthenticationMiddleware:
 
         principal = await keycloak_verifier.verify_token(token)
         ensure_state(scope)[PRINCIPAL_STATE_KEY] = principal
+        bind_request_context(user_id=principal.sub, keycloak_sub=principal.sub)
         await self.app(scope, receive, send)
 
     async def _authenticate_session_cookie(
@@ -93,6 +95,7 @@ class JWTAuthenticationMiddleware:
         state = ensure_state(scope)
         state[PRINCIPAL_STATE_KEY] = principal
         state[AUTH_SESSION_STATE_KEY] = session
+        bind_request_context(user_id=str(session.user_id), keycloak_sub=principal.sub)
         await self.app(scope, receive, send)
 
     def _requires_auth(self, path: str) -> bool:

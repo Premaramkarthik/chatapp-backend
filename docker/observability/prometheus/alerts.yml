@@ -1,0 +1,69 @@
+groups:
+  - name: chatapp-alerts
+    rules:
+      - alert: APIUnavailable
+        expr: up{job="chatapp-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: Chatapp API is unreachable
+
+      - alert: HighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+          /
+          sum(rate(http_requests_total[5m])) > 0.05
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: HTTP 5xx rate exceeds 5%
+
+      - alert: HighLatency
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(http_request_duration_seconds_bucket[5m])) by (le)
+          ) > 2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: API p95 latency exceeds 2s
+
+      - alert: SlowQueries
+        expr: |
+          histogram_quantile(
+            0.95,
+            sum(rate(database_query_duration_seconds_bucket[5m])) by (le)
+          ) > 1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Database p95 query latency exceeds 1s
+
+      - alert: VerificationFailures
+        expr: rate(verification_failure_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Verification failure rate is elevated
+
+      - alert: LoginFailures
+        expr: rate(login_failure_total[5m]) > 0.5
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: Login failure rate is elevated
+
+      - alert: DatabaseQueryFailures
+        expr: rate(database_query_failures_total[5m]) > 0.1
+        for: 5m
+        labels:
+          severity: critical
+        annotations:
+          summary: Database query failures are spiking

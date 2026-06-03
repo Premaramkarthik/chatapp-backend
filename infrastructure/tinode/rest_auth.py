@@ -8,7 +8,10 @@ import time
 from typing import Any
 
 from core.config.settings import settings
-from core.observability.metrics import metrics_registry
+from core.observability.prometheus_metrics import (
+    TINODE_REST_AUTH_DURATION_SECONDS,
+    TINODE_REST_AUTH_TOTAL,
+)
 from infrastructure.database.connection import call_json_function
 from v1.utils.base import TinodeAuthError
 
@@ -38,12 +41,9 @@ async def handle_tinode_request(payload: dict[str, Any]) -> dict[str, Any]:
             return {"err": "unsupported"}
         return {"err": "unsupported"}
     finally:
-        metrics_registry.increment("tinode_rest_auth_total", endpoint=endpoint)
-        metrics_registry.observe_total(
-            "tinode_rest_auth_duration_seconds",
-            duration_seconds=time.perf_counter() - started,
-            endpoint=endpoint,
-        )
+        duration = time.perf_counter() - started
+        TINODE_REST_AUTH_TOTAL.labels(endpoint=endpoint).inc()
+        TINODE_REST_AUTH_DURATION_SECONDS.labels(endpoint=endpoint).observe(duration)
 
 
 async def _handle_auth(payload: dict[str, Any]) -> dict[str, Any]:

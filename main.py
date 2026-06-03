@@ -8,6 +8,7 @@ from fastapi import FastAPI
 
 from core.config.settings import settings
 from core.logging.logger import setup_logger
+from core.observability.setup import init_observability
 from domains.auth.jwks import jwks_refresh_manager
 from domains.auth.verification_reconcile import run_verification_reconcile_loop
 from domains.search.outbox_worker import run_search_outbox_loop
@@ -77,6 +78,7 @@ def create_app() -> FastAPI:
         debug=settings.app.debug,
         lifespan=lifespan,
     )
+    init_observability(api)
     setup_middleware(api)
     api.include_router(health.router)
     api.include_router(auth.router)

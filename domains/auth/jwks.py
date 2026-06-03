@@ -6,7 +6,7 @@ import asyncio
 from contextlib import suppress
 
 from core.config.settings import settings
-from core.observability.metrics import metrics_registry
+from core.observability.prometheus_metrics import AUTH_JWKS_REFRESH_FAILURE_TOTAL
 from infrastructure.keycloak.adapter import keycloak_verifier
 
 
@@ -36,7 +36,7 @@ class JwksRefreshManager:
             try:
                 await keycloak_verifier.refresh_jwks()
             except Exception:
-                metrics_registry.increment("auth_jwks_refresh_failure_total")
+                AUTH_JWKS_REFRESH_FAILURE_TOTAL.inc()
             await asyncio.sleep(settings.keycloak.jwks_refresh_interval_sec)
 
 

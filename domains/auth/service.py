@@ -10,7 +10,14 @@ from starlette.requests import Request
 
 from core.config.settings import settings
 from core.logging.logger import get_logger
-from core.observability.metrics import metrics_registry
+from core.observability.instrumentation import observe_service
+from core.observability.prometheus_metrics import (
+    AUTH_LOGOUT_TOTAL,
+    AUTH_SESSION_CREATED_TOTAL,
+    LOGIN_FAILURE_TOTAL,
+    LOGIN_SUCCESS_TOTAL,
+    SIGNUP_SUCCESS_TOTAL,
+)
 from domains.auth.keycloak_client import KeycloakAuthClient, keycloak_auth_client
 from domains.auth.models import (
     AuthSecurityEventType,
@@ -106,6 +113,7 @@ class AuthService:
             keycloak=self._keycloak,
         )
 
+    @observe_service("auth")
     async def start_signin(
         self,
         *,
@@ -134,7 +142,6 @@ class AuthService:
             request=request,
             metadata={"client_id": settings.keycloak.web_client_id},
         )
-        metrics_registry.increment("auth_signin_started_total")
         return SigninStartResult(
             authorization_url=self._keycloak.authorization_url(
                 state=state,
@@ -146,6 +153,7 @@ class AuthService:
             expires_at=expires_at,
         )
 
+    @observe_service("auth")
     async def signup_start(
         self,
         *,
@@ -239,7 +247,7 @@ class AuthService:
                 keycloak_sub=keycloak_sub,
                 email_hash=ctx.email_hash,
             )
-            metrics_registry.increment("auth_signup_created_total")
+            SIGNUP_SUCCESS_TOTAL.inc()
         except Exception:
             await self._signup_start_provisioner.mark_provision_failure(user=user)
             raise
@@ -432,7 +440,7 @@ class AuthService:
                 keycloak_sub=keycloak_sub,
                 email_hash=email_hash,
             )
-            metrics_registry.increment("auth_signup_created_total")
+            SIGNUP_SUCCESS_TOTAL.inc()
         except Exception:
             await self._user_repository.mark_restricted(user_id=user.id)
             await self._auth_repository.write_outbox_event(
@@ -544,6 +552,7 @@ class AuthService:
             expires_at=expires_at,
         )
 
+    @observe_service("auth")
     async def handle_callback(
         self,
         *,
@@ -600,7 +609,7 @@ class AuthService:
             user=user,
             keycloak_sub=principal.sub,
         )
-        metrics_registry.increment("auth_signin_success_total")
+        LOGIN_SUCCESS_TOTAL.inc()
         return SigninCallbackResult(
             session_token=session_token,
             csrf_token=csrf_token,
@@ -609,6 +618,7 @@ class AuthService:
             principal=principal,
         )
 
+    @observe_service("auth")
     async def logout(
         self,
         *,
@@ -627,7 +637,7 @@ class AuthService:
             user_id=session.user_id,
             keycloak_sub=session.keycloak_sub,
         )
-        metrics_registry.increment("auth_logout_total")
+        AUTH_LOGOUT_TOTAL.inc()
         id_token = self._cipher.decrypt(session.id_token_encrypted)
         return self._keycloak.logout_url(
             id_token_hint=id_token,
@@ -808,7 +818,7 @@ class AuthService:
             state_hash=hash_secret(state),
         )
         if signin_state is None:
-            metrics_registry.increment("auth_signin_failure_total", reason="invalid_state")
+            LOGIN_FAILURE_TOTAL.labels(reason="invalid_state").inc()
             raise AuthenticationError("Invalid or expired signin state")
         return signin_state
 
@@ -926,7 +936,7 @@ class AuthService:
             ip_hash=hash_optional(ip_address),
             user_agent_hash=hash_optional(user_agent),
         )
-        metrics_registry.increment("auth_session_created_total")
+        AUTH_SESSION_CREATED_TOTAL.inc()
         return session
 
     async def _record_event(

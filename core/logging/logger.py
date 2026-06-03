@@ -4,24 +4,29 @@ from typing import Any
 
 from loguru import logger
 
+from core.config.settings import settings
+from core.observability.logging_context import observability_log_patcher
+
 
 def setup_logger(
     log_file: str = "logs/backend.log",
     level: str = "INFO",
     *,
-    json_logs: bool = False,
+    json_logs: bool | None = None,
 ) -> None:
     """Configure loguru logger for console and rotating file output."""
     if "pytest" in sys.modules:
         return
+    resolved_json = json_logs if json_logs is not None else settings.logging.json_logs
     configured = getattr(setup_logger, "_configured", None)
-    if (log_file, level, json_logs) == configured:
+    if (log_file, level, resolved_json) == configured:
         return
-    setup_logger._configured = (log_file, level, json_logs)
+    setup_logger._configured = (log_file, level, resolved_json)
     log_path = Path(log_file)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger.remove()
+    logger.configure(patcher=observability_log_patcher)
 
     console_format = "{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
     file_format = "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}"
@@ -31,7 +36,7 @@ def setup_logger(
         format=console_format,
         level=level,
         colorize=True,
-        serialize=json_logs,
+        serialize=resolved_json,
     )
 
     logger.add(
@@ -44,10 +49,10 @@ def setup_logger(
         mode="a",
         backtrace=True,
         diagnose=True,
-        serialize=json_logs,
+        serialize=resolved_json,
     )
 
-    logger.info("logger_initialized log_file={} level={}", log_file, level)
+    logger.info("logger_initialized log_file={} level={} json={}", log_file, level, resolved_json)
 
 
 def get_logger(name: str) -> Any:

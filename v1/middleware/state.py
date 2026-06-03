@@ -7,6 +7,7 @@ from typing import Any
 from starlette.types import Scope
 
 REQUEST_ID_STATE_KEY = "request_id"
+CORRELATION_ID_STATE_KEY = "correlation_id"
 START_TIME_STATE_KEY = "start_time"
 PRINCIPAL_STATE_KEY = "principal"
 AUTH_SESSION_STATE_KEY = "auth_session"

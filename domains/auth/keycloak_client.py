@@ -11,7 +11,12 @@ import jwt
 
 from core.config.settings import settings
 from core.logging.logger import get_logger
-from core.observability.metrics import metrics_registry
+from core.observability.prometheus_metrics import (
+    AUTH_REFRESH_FAILURE_TOTAL,
+    KEYCLOAK_FAILURES_TOTAL,
+    KEYCLOAK_REQUEST_DURATION_SECONDS,
+    KEYCLOAK_REQUESTS_TOTAL,
+)
 from domains.auth.models import TokenSet
 from v1.utils.base import AuthenticationError, KeycloakIntegrationError
 
@@ -113,7 +118,7 @@ class KeycloakAuthClient:
             "redirect_uri": redirect_uri,
             "code_verifier": code_verifier,
         }
-        data = await self._post_token(payload, metric="auth_token_exchange_latency_seconds")
+        data = await self._post_token(payload, operation="exchange_code")
         return _token_set_from_response(data)
 
     async def refresh(self, *, refresh_token: str) -> TokenSet:
@@ -124,7 +129,7 @@ class KeycloakAuthClient:
             "client_secret": settings.keycloak.web_client_secret_value,
             "refresh_token": refresh_token,
         }
-        data = await self._post_token(payload, metric="auth_refresh_latency_seconds")
+        data = await self._post_token(payload, operation="refresh_token")
         return _token_set_from_response(data)
 
     async def send_password_reset_email(self, *, email: str) -> bool:
@@ -422,25 +427,30 @@ class KeycloakAuthClient:
         except httpx.HTTPError as exc:
             raise KeycloakIntegrationError("Keycloak execute actions email failed") from exc
 
-    async def _post_token(self, payload: dict[str, str], *, metric: str) -> dict[str, Any]:
+    async def _post_token(self, payload: dict[str, str], *, operation: str) -> dict[str, Any]:
         start = datetime.now(UTC)
+        status = "success"
         try:
             async with httpx.AsyncClient(timeout=10.0) as client:
                 response = await client.post(settings.keycloak.token_endpoint, data=payload)
                 response.raise_for_status()
                 return dict(response.json())
         except httpx.HTTPStatusError as exc:
-            metrics_registry.increment(
-                "auth_refresh_failure_total",
-                reason=str(exc.response.status_code),
-            )
+            status = "error"
+            if payload.get("grant_type") == "refresh_token":
+                AUTH_REFRESH_FAILURE_TOTAL.labels(reason=str(exc.response.status_code)).inc()
+            KEYCLOAK_FAILURES_TOTAL.labels(operation=operation).inc()
             raise AuthenticationError("Keycloak token request failed") from exc
         except httpx.HTTPError as exc:
-            metrics_registry.increment("auth_refresh_failure_total", reason=type(exc).__name__)
+            status = "error"
+            if payload.get("grant_type") == "refresh_token":
+                AUTH_REFRESH_FAILURE_TOTAL.labels(reason=type(exc).__name__).inc()
+            KEYCLOAK_FAILURES_TOTAL.labels(operation=operation).inc()
             raise KeycloakIntegrationError("Keycloak token endpoint unavailable") from exc
         finally:
             elapsed = (datetime.now(UTC) - start).total_seconds()
-            metrics_registry.observe_total(metric, duration_seconds=elapsed)
+            KEYCLOAK_REQUEST_DURATION_SECONDS.labels(operation=operation).observe(elapsed)
+            KEYCLOAK_REQUESTS_TOTAL.labels(operation=operation, status=status).inc()
 
     async def _admin_token(self) -> str:
         payload = {
@@ -448,7 +458,7 @@ class KeycloakAuthClient:
             "client_id": settings.keycloak.admin_client_id,
             "client_secret": settings.keycloak.admin_client_secret_value,
         }
-        data = await self._post_token(payload, metric="auth_token_exchange_latency_seconds")
+        data = await self._post_token(payload, operation="admin_token")
         return str(data["access_token"])
 
     async def _find_user_id_by_email(self, email: str, *, token: str) -> str | None:
