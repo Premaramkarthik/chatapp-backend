@@ -1,4 +1,4 @@
--- Tinode chat: inbox listing, provisioning lifecycle, archive.
+-- Tinode chat functions (authoritative fn_tinode_conversation_mappings).
 
 CREATE OR REPLACE FUNCTION fn_tinode_conversation_mappings(mode INT, payload JSONB DEFAULT '{}'::jsonb)
 RETURNS JSONB

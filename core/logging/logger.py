@@ -4,39 +4,43 @@ from typing import Any
 
 from loguru import logger
 
-from core.config.settings import settings
 from core.observability.logging_context import observability_log_patcher
+
+LOG_FORMAT = (
+    "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {extra[request_id]} | "
+    "{extra[logger_name]}:{function}:{line} | {message}"
+)
 
 
 def setup_logger(
     log_file: str = "logs/backend.log",
     level: str = "INFO",
-    *,
-    json_logs: bool | None = None,
 ) -> None:
-    """Configure loguru logger for console and rotating file output."""
+    """Configure loguru for app logs; leave uvicorn on its native handlers/format."""
     if "pytest" in sys.modules:
         return
-    resolved_json = json_logs if json_logs is not None else settings.logging.json_logs
+
     configured = getattr(setup_logger, "_configured", None)
-    if (log_file, level, resolved_json) == configured:
+    config_key = (log_file, level)
+    if config_key == configured:
         return
-    setup_logger._configured = (log_file, level, resolved_json)
+    setup_logger._configured = config_key
+
     log_path = Path(log_file)
     log_path.parent.mkdir(parents=True, exist_ok=True)
 
     logger.remove()
-    logger.configure(patcher=observability_log_patcher)
-
-    console_format = "{time:YYYY-MM-DD HH:mm:ss} | {level} | {message}"
-    file_format = "{time:YYYY-MM-DD HH:mm:ss} | {level: <8} | {name}:{function}:{line} | {message}"
+    logger.configure(
+        patcher=observability_log_patcher,
+        extra={"request_id": "", "logger_name": ""},
+    )
 
     logger.add(
         sys.stderr,
-        format=console_format,
+        format=LOG_FORMAT,
         level=level,
         colorize=True,
-        serialize=resolved_json,
+        serialize=False,
     )
 
     logger.add(
@@ -44,15 +48,19 @@ def setup_logger(
         rotation="100 MB",
         retention="30 days",
         level=level,
-        format=file_format,
+        format=LOG_FORMAT,
         encoding="utf-8",
         mode="a",
         backtrace=True,
         diagnose=True,
-        serialize=resolved_json,
+        serialize=False,
     )
 
-    logger.info("logger_initialized log_file={} level={} json={}", log_file, level, resolved_json)
+    logger.info(
+        "logger_initialized log_file={} level={}",
+        log_file,
+        level,
+    )
 
 
 def get_logger(name: str) -> Any:
@@ -64,4 +72,4 @@ def get_logger(name: str) -> Any:
     Returns:
         A loguru logger bound with module metadata.
     """
-    return logger.bind(module=name)
+    return logger.bind(module=name, logger_name=name)

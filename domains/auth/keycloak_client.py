@@ -18,48 +18,17 @@ from core.observability.prometheus_metrics import (
     KEYCLOAK_REQUESTS_TOTAL,
 )
 from domains.auth.models import TokenSet
+from infrastructure.keycloak.admin_client import KeycloakAdminClient, keycloak_admin_client
 from v1.utils.base import AuthenticationError, KeycloakIntegrationError
 
 logger = get_logger(__name__)
 
 
-def _admin_log_path(url: str) -> str:
-    """Return a realm-relative admin path suitable for structured logs."""
-    prefix = settings.keycloak.admin_realm_url
-    if url.startswith(prefix):
-        return url[len(prefix) :]
-    return url
-
-
-def _log_keycloak_admin_response(
-    *,
-    method: str,
-    url: str,
-    status_code: int | str,
-    duration_ms: float,
-    keycloak_user_id: str | None = None,
-    error_type: str | None = None,
-) -> None:
-    """Emit structured logs for Keycloak Admin API calls."""
-    fields = (
-        "keycloak_admin_response method={} path={} status_code={} duration_ms={:.1f} "
-        "keycloak_sub={}"
-    )
-    values: list[object] = [
-        method,
-        _admin_log_path(url),
-        status_code,
-        duration_ms,
-        keycloak_user_id or "",
-    ]
-    if error_type:
-        logger.warning(fields + " error_type={}", *values, error_type)
-        return
-    logger.info(fields, *values)
-
-
 class KeycloakAuthClient:
-    """Async adapter for Keycloak auth code, refresh, logout, and reset email flows."""
+    """Async adapter for Keycloak auth code, refresh, logout, and admin delegation."""
+
+    def __init__(self, admin: KeycloakAdminClient | None = None) -> None:
+        self._admin = admin or keycloak_admin_client
 
     def authorization_url(
         self,
@@ -83,6 +52,7 @@ class KeycloakAuthClient:
         }
         if identity_provider:
             params["kc_idp_hint"] = identity_provider
+            params["prompt"] = "select_account"
         query = urlencode(params)
         return f"{settings.keycloak.authorization_endpoint}?{query}"
 
@@ -132,26 +102,22 @@ class KeycloakAuthClient:
         data = await self._post_token(payload, operation="refresh_token")
         return _token_set_from_response(data)
 
+    async def password_grant(self, *, username: str, password: str) -> TokenSet:
+        """Exchange email/password for tokens via the confidential web client."""
+        payload = {
+            "grant_type": "password",
+            "client_id": settings.keycloak.web_client_id,
+            "client_secret": settings.keycloak.web_client_secret_value,
+            "username": username,
+            "password": password,
+            "scope": "openid email profile",
+        }
+        data = await self._post_token(payload, operation="password_grant")
+        return _token_set_from_response(data)
+
     async def send_password_reset_email(self, *, email: str) -> bool:
-        """Ask Keycloak to email UPDATE_PASSWORD to a matching user.
-
-        The caller must always return a generic public response to prevent user
-        enumeration. This return value is for audit/metrics only.
-        """
-        token = await self._admin_token()
-        user_id = await self._find_user_id_by_email(email, token=token)
-        if user_id is None:
-            return False
-
-        try:
-            await self._execute_actions_email(
-                user_id=user_id,
-                token=token,
-                actions=["UPDATE_PASSWORD"],
-            )
-        except httpx.HTTPError as exc:
-            raise KeycloakIntegrationError("Keycloak password reset email failed") from exc
-        return True
+        """Ask Keycloak to email UPDATE_PASSWORD to a matching user."""
+        return await self._admin.send_password_reset_email(email=email)
 
     async def create_user(
         self,
@@ -161,93 +127,23 @@ class KeycloakAuthClient:
         required_actions: list[str] | None = None,
     ) -> str:
         """Create a Keycloak user and return the Keycloak user ID/sub."""
-        token = await self._admin_token()
-        existing = await self._find_user_id_by_email(email, token=token)
-        if existing:
-            return existing
-
-        payload = {
-            "username": email,
-            "email": email,
-            "firstName": display_name,
-            "enabled": True,
-            "emailVerified": False,
-            "requiredActions": required_actions or [],
-        }
-        token = await self._admin_token()
-        url = f"{settings.keycloak.admin_realm_url}/users"
-        start = datetime.now(UTC)
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    url,
-                    headers={"Authorization": f"Bearer {token}"},
-                    json=payload,
-                )
-                if response.status_code == 409:
-                    existing = await self._find_user_id_by_email(email, token=token)
-                    if existing:
-                        return existing
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            status_code = getattr(getattr(exc, "response", None), "status_code", "error")
-            elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
-            _log_keycloak_admin_response(
-                method="POST",
-                url=url,
-                status_code=status_code,
-                duration_ms=elapsed_ms,
-                error_type=type(exc).__name__,
-            )
-            raise KeycloakIntegrationError("Keycloak user creation failed") from exc
-        elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
-        _log_keycloak_admin_response(
-            method="POST",
-            url=url,
-            status_code=response.status_code,
-            duration_ms=elapsed_ms,
+        return await self._admin.create_user(
+            email=email,
+            display_name=display_name,
+            required_actions=required_actions,
         )
-
-        location = response.headers.get("location", "")
-        user_id = location.rstrip("/").rsplit("/", 1)[-1] if location else None
-        if not user_id:
-            user_id = await self._find_user_id_by_email(email, token=token)
-        if not user_id:
-            raise KeycloakIntegrationError("Keycloak user creation did not return a user id")
-        await self.assign_default_client_roles(user_id=user_id)
-        return user_id
 
     async def assign_default_client_roles(self, *, user_id: str) -> None:
         """Assign default chatapp-api capability roles to a Keycloak user."""
-        token = await self._admin_token()
-        client_uuid = await self._client_uuid(settings.keycloak.audience, token=token)
-        roles = await self._client_role_representations(
-            client_uuid=client_uuid,
-            role_names=settings.auth.default_signup_roles,
-            token=token,
-        )
-        if not roles:
-            return
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.post(
-                    f"{settings.keycloak.admin_realm_url}/users/{user_id}"
-                    f"/role-mappings/clients/{client_uuid}",
-                    headers={"Authorization": f"Bearer {token}"},
-                    json=roles,
-                )
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise KeycloakIntegrationError("Keycloak role assignment failed") from exc
+        await self._admin.assign_default_client_roles(user_id=user_id)
 
     async def send_account_setup_email(self, *, user_id: str) -> None:
-        """Send initial setup email requiring verification and password setup."""
-        token = await self._admin_token()
-        await self._execute_actions_email(
-            user_id=user_id,
-            token=token,
-            actions=["VERIFY_EMAIL", "UPDATE_PASSWORD"],
-        )
+        """Send a verify-only email (legacy alias)."""
+        await self._admin.send_account_setup_email(user_id=user_id)
+
+    async def clear_required_actions(self, *, user_id: str) -> None:
+        """Remove pending Keycloak required actions on a user."""
+        await self._admin.clear_required_actions(user_id=user_id)
 
     async def set_user_password(
         self,
@@ -257,45 +153,15 @@ class KeycloakAuthClient:
         temporary: bool = False,
     ) -> None:
         """Set a Keycloak user password via Admin API."""
-        token = await self._admin_token()
-        url = f"{settings.keycloak.admin_realm_url}/users/{user_id}/reset-password"
-        start = datetime.now(UTC)
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.put(
-                    url,
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={
-                        "type": "password",
-                        "value": password,
-                        "temporary": temporary,
-                    },
-                )
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            status_code = getattr(getattr(exc, "response", None), "status_code", "error")
-            elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
-            _log_keycloak_admin_response(
-                method="PUT",
-                url=url,
-                status_code=status_code,
-                duration_ms=elapsed_ms,
-                keycloak_user_id=user_id,
-                error_type=type(exc).__name__,
-            )
-            raise KeycloakIntegrationError("Keycloak password update failed") from exc
-        elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
-        _log_keycloak_admin_response(
-            method="PUT",
-            url=url,
-            status_code=response.status_code,
-            duration_ms=elapsed_ms,
-            keycloak_user_id=user_id,
+        await self._admin.set_user_password(
+            user_id=user_id,
+            password=password,
+            temporary=temporary,
         )
 
     async def send_verification_email(self, *, user_id: str) -> None:
         """Send a verification-only email."""
-        await self.send_verify_email(user_id=user_id)
+        await self._admin.send_verification_email(user_id=user_id)
 
     async def update_user_profile(
         self,
@@ -304,134 +170,25 @@ class KeycloakAuthClient:
         display_name: str,
     ) -> None:
         """Update Keycloak profile fields for a user."""
-        token = await self._admin_token()
-        url = f"{settings.keycloak.admin_realm_url}/users/{user_id}"
-        start = datetime.now(UTC)
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.put(
-                    url,
-                    headers={"Authorization": f"Bearer {token}"},
-                    json={"firstName": display_name},
-                )
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            status_code = getattr(getattr(exc, "response", None), "status_code", "error")
-            elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
-            _log_keycloak_admin_response(
-                method="PUT",
-                url=url,
-                status_code=status_code,
-                duration_ms=elapsed_ms,
-                keycloak_user_id=user_id,
-                error_type=type(exc).__name__,
-            )
-            raise KeycloakIntegrationError("Keycloak profile update failed") from exc
-        elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
-        _log_keycloak_admin_response(
-            method="PUT",
-            url=url,
-            status_code=response.status_code,
-            duration_ms=elapsed_ms,
-            keycloak_user_id=user_id,
-        )
+        await self._admin.update_user_profile(user_id=user_id, display_name=display_name)
 
     async def send_verify_email(self, *, user_id: str) -> None:
         """Send a pure email verification email."""
-        token = await self._admin_token()
-        url = f"{settings.keycloak.admin_realm_url}/users/{user_id}/send-verify-email"
-        start = datetime.now(UTC)
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.put(
-                    url,
-                    params={"client_id": settings.keycloak.web_client_id},
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            status_code = getattr(getattr(exc, "response", None), "status_code", "error")
-            elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
-            _log_keycloak_admin_response(
-                method="PUT",
-                url=url,
-                status_code=status_code,
-                duration_ms=elapsed_ms,
-                keycloak_user_id=user_id,
-                error_type=type(exc).__name__,
-            )
-            raise KeycloakIntegrationError("Keycloak verify email send failed") from exc
-        elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
-        _log_keycloak_admin_response(
-            method="PUT",
-            url=url,
-            status_code=response.status_code,
-            duration_ms=elapsed_ms,
-            keycloak_user_id=user_id,
-        )
+        await self._admin.send_verify_email(user_id=user_id)
 
     async def get_user_email_verified(self, *, user_id: str) -> bool:
         """Return whether Keycloak marks the user's email as verified."""
-        token = await self._admin_token()
-        url = f"{settings.keycloak.admin_realm_url}/users/{user_id}"
-        start = datetime.now(UTC)
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    url,
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            status_code = getattr(getattr(exc, "response", None), "status_code", "error")
-            elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
-            _log_keycloak_admin_response(
-                method="GET",
-                url=url,
-                status_code=status_code,
-                duration_ms=elapsed_ms,
-                keycloak_user_id=user_id,
-                error_type=type(exc).__name__,
-            )
-            raise KeycloakIntegrationError("Keycloak user lookup failed") from exc
-        elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
-        _log_keycloak_admin_response(
-            method="GET",
-            url=url,
-            status_code=response.status_code,
-            duration_ms=elapsed_ms,
-            keycloak_user_id=user_id,
-        )
-        return bool(response.json().get("emailVerified", False))
+        return await self._admin.get_user_email_verified(user_id=user_id)
 
-    async def _execute_actions_email(
-        self,
-        *,
-        user_id: str,
-        token: str,
-        actions: list[str],
-    ) -> None:
-        params = {
-            "client_id": settings.keycloak.web_client_id,
-            "lifespan": str(settings.auth.reset_email_lifespan_sec),
-        }
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.put(
-                    f"{settings.keycloak.admin_realm_url}/users/{user_id}/execute-actions-email",
-                    params=params,
-                    headers={"Authorization": f"Bearer {token}"},
-                    json=actions,
-                )
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise KeycloakIntegrationError("Keycloak execute actions email failed") from exc
+    async def delete_user(self, *, user_id: str) -> None:
+        """Delete a Keycloak user account."""
+        await self._admin.delete_user(user_id)
 
     async def _post_token(self, payload: dict[str, str], *, operation: str) -> dict[str, Any]:
         start = datetime.now(UTC)
         status = "success"
         try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
+            async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
                 response = await client.post(settings.keycloak.token_endpoint, data=payload)
                 response.raise_for_status()
                 return dict(response.json())
@@ -440,7 +197,10 @@ class KeycloakAuthClient:
             if payload.get("grant_type") == "refresh_token":
                 AUTH_REFRESH_FAILURE_TOTAL.labels(reason=str(exc.response.status_code)).inc()
             KEYCLOAK_FAILURES_TOTAL.labels(operation=operation).inc()
-            raise AuthenticationError("Keycloak token request failed") from exc
+            raise _authentication_error_from_token_response(
+                exc,
+                grant_type=str(payload.get("grant_type", "")),
+            ) from exc
         except httpx.HTTPError as exc:
             status = "error"
             if payload.get("grant_type") == "refresh_token":
@@ -452,66 +212,33 @@ class KeycloakAuthClient:
             KEYCLOAK_REQUEST_DURATION_SECONDS.labels(operation=operation).observe(elapsed)
             KEYCLOAK_REQUESTS_TOTAL.labels(operation=operation, status=status).inc()
 
-    async def _admin_token(self) -> str:
-        payload = {
-            "grant_type": "client_credentials",
-            "client_id": settings.keycloak.admin_client_id,
-            "client_secret": settings.keycloak.admin_client_secret_value,
-        }
-        data = await self._post_token(payload, operation="admin_token")
-        return str(data["access_token"])
 
-    async def _find_user_id_by_email(self, email: str, *, token: str) -> str | None:
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    f"{settings.keycloak.admin_realm_url}/users",
-                    params={"email": email, "exact": "true", "max": "2"},
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise KeycloakIntegrationError("Keycloak user lookup failed") from exc
+def _authentication_error_from_token_response(
+    exc: httpx.HTTPStatusError,
+    *,
+    grant_type: str,
+) -> AuthenticationError:
+    """Map Keycloak OAuth token errors to BFF authentication errors."""
+    try:
+        body = exc.response.json()
+    except ValueError:
+        body = {}
+    error = str(body.get("error", ""))
+    description = str(body.get("error_description", "")).lower()
 
-        users = response.json()
-        if not users:
-            return None
-        return str(users[0]["id"])
+    if grant_type == "password" and error == "invalid_grant":
+        if "account is not fully set up" in description:
+            return AuthenticationError(
+                "Email verification is required before signin",
+                code="email_verification_required",
+            )
+        if (
+            "invalid user credentials" in description
+            or "invalid username or password" in description
+        ):
+            return AuthenticationError("Invalid email or password")
 
-    async def _client_uuid(self, client_id: str, *, token: str) -> str:
-        try:
-            async with httpx.AsyncClient(timeout=10.0) as client:
-                response = await client.get(
-                    f"{settings.keycloak.admin_realm_url}/clients",
-                    params={"clientId": client_id},
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                response.raise_for_status()
-        except httpx.HTTPError as exc:
-            raise KeycloakIntegrationError("Keycloak client lookup failed") from exc
-        clients = response.json()
-        if not clients:
-            raise KeycloakIntegrationError("Keycloak API client not found")
-        return str(clients[0]["id"])
-
-    async def _client_role_representations(
-        self,
-        *,
-        client_uuid: str,
-        role_names: list[str],
-        token: str,
-    ) -> list[dict[str, Any]]:
-        roles: list[dict[str, Any]] = []
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            for role_name in role_names:
-                response = await client.get(
-                    f"{settings.keycloak.admin_realm_url}/clients/{client_uuid}"
-                    f"/roles/{role_name}",
-                    headers={"Authorization": f"Bearer {token}"},
-                )
-                response.raise_for_status()
-                roles.append(response.json())
-        return roles
+    return AuthenticationError("Keycloak token request failed")
 
 
 def _token_set_from_response(data: dict[str, Any]) -> TokenSet:

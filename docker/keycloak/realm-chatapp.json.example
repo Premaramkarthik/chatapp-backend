@@ -5,6 +5,35 @@
   "resetPasswordAllowed": true,
   "rememberMe": true,
   "verifyEmail": true,
+  "requiredActions": [
+    {
+      "alias": "UPDATE_PASSWORD",
+      "name": "Update Password",
+      "providerId": "UPDATE_PASSWORD",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 30,
+      "config": {}
+    },
+    {
+      "alias": "UPDATE_PROFILE",
+      "name": "Update Profile",
+      "providerId": "UPDATE_PROFILE",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 40,
+      "config": {}
+    },
+    {
+      "alias": "VERIFY_EMAIL",
+      "name": "Verify Email",
+      "providerId": "VERIFY_EMAIL",
+      "enabled": true,
+      "defaultAction": false,
+      "priority": 50,
+      "config": {}
+    }
+  ],
   "loginWithEmailAllowed": true,
   "duplicateEmailsAllowed": false,
   "bruteForceProtected": true,
@@ -67,22 +96,27 @@
       "name": "chatapp-web",
       "enabled": true,
       "protocol": "openid-connect",
-      "clientAuthenticatorType": "client-secret",
-      "secret": "change-me",
-      "publicClient": false,
+      "publicClient": true,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": false,
+      "directAccessGrantsEnabled": true,
       "serviceAccountsEnabled": false,
       "redirectUris": [
-        "http://localhost:8000/v1/auth/signin/callback"
+        "http://localhost:8000/v1/auth/signin/callback",
+        "http://localhost:5173/home/auth/callback",
+        "http://127.0.0.1:5173/home/auth/callback",
+        "http://localhost:5173/home/verify-email/complete",
+        "http://127.0.0.1:5173/home/verify-email/complete"
       ],
       "webOrigins": [
-        "http://localhost:3000"
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:3000",
+        "http://localhost:8080"
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:3000"
+        "post.logout.redirect.uris": "http://localhost:5173/home"
       },
       "protocolMappers": [
         {

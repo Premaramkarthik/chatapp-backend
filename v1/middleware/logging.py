@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import time
-from typing import Any
 
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
@@ -80,20 +79,31 @@ class RequestResponseLoggingMiddleware:
             headers = Headers(scope=scope)
             client = scope.get("client")
             client_host = client[0] if client else None
-            log_payload: dict[str, Any] = {
-                "event": "http_request_completed",
-                "request_id": request_id,
-                "correlation_id": correlation_id,
-                "method": scope["method"],
-                "path": scope["path"],
-                "status_code": resolved_status_code,
-                "duration_ms": round(duration_ms, 3),
-                "client_host": client_host,
-                "user_agent": headers.get("user-agent"),
-            }
+            duration_ms_rounded = round(duration_ms, 3)
+            optional_fields = ""
             if response_size is not None:
-                log_payload["response_size"] = response_size
+                optional_fields += f" response_size={response_size}"
             if error_type:
-                log_payload["error_type"] = error_type
-            logger.info("{}", log_payload)
+                optional_fields += f" error_type={error_type}"
+            message = (
+                "http_request_completed method={} path={} status_code={} duration_ms={} "
+                "request_id={} correlation_id={} client_host={} user_agent={}{}"
+            )
+            log_args = (
+                scope["method"],
+                scope["path"],
+                resolved_status_code,
+                duration_ms_rounded,
+                request_id,
+                correlation_id,
+                client_host,
+                headers.get("user-agent"),
+                optional_fields,
+            )
+            if resolved_status_code >= 500:
+                logger.error(message, *log_args)
+            elif resolved_status_code >= 400:
+                logger.warning(message, *log_args)
+            else:
+                logger.info(message, *log_args)
             clear_request_context()

@@ -62,7 +62,7 @@ def signup_start_result_from_mapping(data: dict) -> SignupStartResult:
     parsed_expires_at = datetime.fromisoformat(expires_at) if isinstance(expires_at, str) else None
     return SignupStartResult(
         status=str(data.get("status", "accepted")),
-        next_step=str(data.get("next_step", "complete_profile")),
+        next_step=str(data.get("next_step", "verify_email")),
         signup_token=data.get("signup_token"),
         expires_at=parsed_expires_at,
     )

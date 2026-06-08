@@ -6,8 +6,10 @@ import asyncio
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
+from core.logging.logger import get_logger
+from domains.auth.security import hash_secret
 from infrastructure.database.repositories.discovery import PostgresDiscoveryRepository
 from infrastructure.database.repositories.matching import PostgresMatchingRepository
 from infrastructure.database.repositories.travelers import PostgresTravelerRepository
@@ -25,6 +27,9 @@ from v1.schemas.travelers import (
     TravelerSearchResult,
     TravelPlanCreateRequest,
 )
+from v1.utils.request_context import request_id_from
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/v1/travelers", tags=["travelers"])
 CurrentPrincipal = Annotated[KeycloakPrincipal, Depends(get_current_principal)]
@@ -63,18 +68,30 @@ async def get_traveler_profile(principal: CurrentPrincipal) -> TravelerProfileRe
 
 @router.put("/profile", response_model=TravelerProfileResponse)
 async def upsert_traveler_profile(
+    request: Request,
     payload: TravelerProfileUpdateRequest,
     _: TripCreator,
     principal: CurrentPrincipal,
 ) -> TravelerProfileResponse:
     """Create or update traveler profile and rebuild discovery snapshot."""
+    request_id = request_id_from(request)
     user = await PostgresUserRepository().get_by_keycloak_sub(principal.sub)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
     _require_traveler_mode(user.account_mode)
+    logger.info(
+        "traveler_profile_upsert_received request_id={} user_id={}",
+        request_id,
+        user.id,
+    )
     row = await PostgresTravelerRepository().upsert_traveler_profile(
         user.id,
         **payload.model_dump(exclude_unset=True),
+    )
+    logger.info(
+        "traveler_profile_upsert_committed request_id={} user_id={}",
+        request_id,
+        user.id,
     )
     fields = {k: v for k, v in row.items() if k != "user_id"}
     return TravelerProfileResponse(user_id=UUID(row["user_id"]), **fields)
@@ -82,12 +99,20 @@ async def upsert_traveler_profile(
 
 @router.post("/trips", status_code=status.HTTP_201_CREATED)
 async def create_travel_plan(
+    request: Request,
     payload: TravelPlanCreateRequest,
     _: TripCreator,
     principal: CurrentPrincipal,
 ) -> dict:
     """Create a travel plan with destinations."""
+    request_id = request_id_from(request)
     user_id = await _local_user_id(principal)
+    logger.info(
+        "travel_plan_create_received request_id={} user_id={} title={}",
+        request_id,
+        user_id,
+        payload.title,
+    )
     plan = await PostgresTripRepository().create_travel_plan(
         user_id,
         title=payload.title,
@@ -95,6 +120,12 @@ async def create_travel_plan(
         end_date=payload.end_date,
         is_primary=payload.is_primary,
         destinations=[dest.model_dump() for dest in payload.destinations],
+    )
+    logger.info(
+        "travel_plan_created request_id={} user_id={} plan_id={}",
+        request_id,
+        user_id,
+        plan.get("id"),
     )
     return {"plan": dict(plan)}
 
@@ -119,6 +150,7 @@ async def update_current_location(
 
 @router.get("/search", response_model=TravelerSearchResponse)
 async def search_travelers_route(
+    request: Request,
     _: TripSearcher,
     principal: CurrentPrincipal,
     destination_country: str = Query(..., min_length=2, max_length=2),
@@ -131,7 +163,16 @@ async def search_travelers_route(
     """Search discoverable travelers by destination country (Meilisearch + hydrate)."""
     from core.config.settings import settings
 
+    request_id = request_id_from(request)
+    query_hash = hash_secret(f"{destination_country}:{q}:{city_id}:{current_country}")[:16]
     viewer_id = await _local_user_id(principal)
+    logger.info(
+        "traveler_search_received request_id={} viewer_id={} destination_country={} query_hash={}",
+        request_id,
+        viewer_id,
+        destination_country.upper(),
+        query_hash,
+    )
     discovery = PostgresDiscoveryRepository()
     hits: list[TravelerSearchResult] = []
     total = 0
@@ -178,6 +219,13 @@ async def search_travelers_route(
         total = len(rows)
         hits = [_snapshot_to_search_result(row) for row in rows if str(row["user_id"]) != viewer_id]
 
+    logger.info(
+        "traveler_search_committed request_id={} viewer_id={} hit_count={} total={}",
+        request_id,
+        viewer_id,
+        len(hits),
+        total,
+    )
     return TravelerSearchResponse(hits=hits, total=total, limit=limit, offset=offset)
 
 

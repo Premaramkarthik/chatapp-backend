@@ -9,6 +9,13 @@ import jwt
 from starlette.requests import Request
 
 from core.config.settings import settings
+from core.logging.domain_events import (
+    AUTH_SIGNUP_FAILED,
+    AUTH_SIGNUP_STARTED,
+    AUTH_SIGNUP_SUCCESS,
+    PASSWORD_RESET_TRIGGERED,
+    log_domain_event,
+)
 from core.logging.logger import get_logger
 from core.observability.instrumentation import observe_service
 from core.observability.prometheus_metrics import (
@@ -66,7 +73,8 @@ from infrastructure.database.repositories.auth import PostgresAuthRepository
 from infrastructure.database.repositories.users import PostgresUserRepository
 from infrastructure.keycloak.adapter import keycloak_verifier
 from v1.schemas.principal import KeycloakPrincipal
-from v1.utils.base import AppError, AuthenticationError, AuthorizationError
+from v1.utils.base import AppError, AuthenticationError, AuthorizationError, SigninCallbackError
+from v1.utils.request_context import request_id_from
 
 logger = get_logger(__name__)
 
@@ -89,6 +97,7 @@ class SigninCallbackResult:
     session: AuthSession
     post_signin_redirect_uri: str
     principal: KeycloakPrincipal
+    user: User
 
 
 class AuthService:
@@ -118,9 +127,29 @@ class AuthService:
         self,
         *,
         post_signin_redirect_uri: str | None,
+        identity_provider: str | None = None,
+        account_mode: str | None = None,
+        device_fingerprint: str | None = None,
+        captcha_token: str | None = None,
         request: Request,
     ) -> SigninStartResult:
         """Create one-time PKCE signin state and return a Keycloak auth URL."""
+        request_id = request_id_from(request)
+        logger.info(
+            "signin_start_received request_id={} identity_provider={}",
+            request_id,
+            identity_provider,
+        )
+        flow_type = "signup" if identity_provider else "signin"
+        if identity_provider:
+            fingerprint = device_fingerprint or "web-client"
+            await self._guard_signup_abuse(
+                email=None,
+                device_fingerprint=fingerprint,
+                captcha_token=captcha_token,
+                request=request,
+                social=True,
+            )
         verifier = create_pkce_verifier()
         challenge = create_pkce_challenge(verifier)
         state = generate_token()
@@ -136,22 +165,162 @@ class AuthService:
             redirect_uri=settings.auth.callback_url,
             post_signin_redirect_uri=safe_redirect,
             expires_at=expires_at,
+            flow_type=flow_type,
+            account_mode=account_mode,
+            identity_provider=identity_provider,
         )
         await self._record_event(
             AuthSecurityEventType.SIGNIN_STARTED,
             request=request,
-            metadata={"client_id": settings.keycloak.web_client_id},
+            metadata={
+                "client_id": settings.keycloak.web_client_id,
+                "identity_provider": identity_provider,
+            },
         )
+        logger.info("signin_state_created request_id={} expires_at={}", request_id, expires_at)
         return SigninStartResult(
             authorization_url=self._keycloak.authorization_url(
                 state=state,
                 nonce=nonce,
                 code_challenge=challenge,
                 redirect_uri=settings.auth.callback_url,
+                identity_provider=identity_provider,
             ),
             state=state,
             expires_at=expires_at,
         )
+
+    @observe_service("auth")
+    async def signin_password(
+        self,
+        *,
+        email: str,
+        password: str,
+        request: Request,
+    ) -> SigninCallbackResult:
+        """Sign in with email/password using server-side Keycloak token exchange."""
+        request_id = request_id_from(request)
+        normalized_email = normalize_email(email)
+        email_hash = hash_secret(normalized_email)
+        logger.info(
+            "signin_password_received request_id={} email_hash={}", request_id, email_hash[:16]
+        )
+        await self._guard_password_signin_abuse(request=request)
+        try:
+            token_set = await self._keycloak.password_grant(
+                username=normalized_email,
+                password=password,
+            )
+        except AuthenticationError as exc:
+            if exc.code == "email_verification_required":
+                LOGIN_FAILURE_TOTAL.labels(reason="email_not_verified").inc()
+                await self._record_event(
+                    AuthSecurityEventType.SIGNIN_FAILED,
+                    request=request,
+                    email_hash=email_hash,
+                    metadata={"reason": "email_not_verified"},
+                )
+                raise
+            LOGIN_FAILURE_TOTAL.labels(reason="invalid_credentials").inc()
+            await self._record_event(
+                AuthSecurityEventType.SIGNIN_FAILED,
+                request=request,
+                email_hash=email_hash,
+                metadata={"reason": "invalid_credentials"},
+            )
+            raise AuthenticationError("Invalid email or password") from None
+        principal = await keycloak_verifier.verify_token(token_set.access_token)
+        signin_state = SigninState(
+            id="password",
+            state_hash="",
+            nonce_hash="",
+            code_verifier_encrypted="",
+            redirect_uri=settings.auth.callback_url,
+            post_signin_redirect_uri=settings.auth.default_post_signin_redirect_url,
+            expires_at=now_utc(),
+            flow_type="signin",
+        )
+        user = await self._activate_or_reject_signin(principal, signin_state, request)
+        display_name = principal.display_name or principal.preferred_username
+        if user is None:
+            user = await self._user_repository.bootstrap(
+                BootstrapUserCommand(
+                    keycloak_sub=principal.sub,
+                    email=principal.email,
+                    display_name=display_name,
+                )
+            )
+        session_token = generate_token()
+        csrf_token = generate_token()
+        session = await self._create_session(
+            user=user,
+            principal=principal,
+            token_set=token_set,
+            session_token=session_token,
+            csrf_token=csrf_token,
+            request=request,
+        )
+        await cache_session_snapshot(session, roles=principal.roles)
+        await self._record_event(
+            AuthSecurityEventType.SIGNIN_SUCCEEDED,
+            request=request,
+            user=user,
+            keycloak_sub=principal.sub,
+        )
+        LOGIN_SUCCESS_TOTAL.inc()
+        return SigninCallbackResult(
+            session_token=session_token,
+            csrf_token=csrf_token,
+            session=session,
+            post_signin_redirect_uri=settings.auth.default_post_signin_redirect_url,
+            principal=principal,
+            user=user,
+        )
+
+    async def complete_onboarding(
+        self,
+        *,
+        keycloak_sub: str,
+        display_name: str,
+        account_mode: str,
+        request: Request,
+    ) -> User:
+        """Complete onboarding for users in pending_profile_setup."""
+        request_id = request_id_from(request)
+        logger.info(
+            "onboarding_complete_received request_id={} keycloak_sub={} account_mode={}",
+            request_id,
+            keycloak_sub,
+            account_mode,
+        )
+        user = await self._user_repository.get_by_keycloak_sub(keycloak_sub)
+        if user is None or user.status != "pending_profile_setup":
+            raise AuthenticationError("Onboarding is not available for this account")
+        completed = await self._user_repository.complete_onboarding(
+            user_id=user.id,
+            display_name=display_name,
+            account_mode=account_mode,
+        )
+        if completed is None:
+            raise AuthenticationError("Onboarding could not be completed")
+        if user.keycloak_sub:
+            await self._keycloak.update_user_profile(
+                user_id=user.keycloak_sub,
+                display_name=display_name,
+            )
+        await self._auth_repository.write_outbox_event(
+            event_type="signup.onboarding_completed",
+            aggregate_type="user",
+            aggregate_id=completed.id,
+            payload={"account_mode": account_mode},
+        )
+        await self._record_event(
+            AuthSecurityEventType.SIGNUP_CREATED,
+            request=request,
+            user=completed,
+            keycloak_sub=keycloak_sub,
+        )
+        return completed
 
     @observe_service("auth")
     async def signup_start(
@@ -165,7 +334,8 @@ class AuthService:
         request: Request,
     ) -> SignupStartResult:
         """Create pending account with password set in Keycloak; return signup session token."""
-        request_id = _request_id(request)
+        request_id = request_id_from(request)
+        log_domain_event(AUTH_SIGNUP_STARTED, request_id=request_id)
         logger.info(
             "signup_start_received request_id={} idempotency_key_hash={} email_hash={}",
             request_id,
@@ -248,7 +418,14 @@ class AuthService:
                 email_hash=ctx.email_hash,
             )
             SIGNUP_SUCCESS_TOTAL.inc()
+            log_domain_event(
+                AUTH_SIGNUP_SUCCESS,
+                request_id=request_id,
+                user_id=user.id,
+                keycloak_sub=keycloak_sub,
+            )
         except Exception:
+            log_domain_event(AUTH_SIGNUP_FAILED, request_id=request_id)
             await self._signup_start_provisioner.mark_provision_failure(user=user)
             raise
 
@@ -275,7 +452,7 @@ class AuthService:
         request: Request,
     ) -> SignupCompleteResult:
         """Complete signup profile for a pending verification user."""
-        request_id = _request_id(request)
+        request_id = request_id_from(request)
         logger.info("signup_complete_received request_id={}", request_id)
         session = await self._auth_repository.resolve_signup_session(
             token_hash=hash_secret(signup_token),
@@ -335,8 +512,15 @@ class AuthService:
         request: Request,
     ) -> SignupResult:
         """Create a local pending account, then create/link a Keycloak user."""
+        request_id = request_id_from(request)
         normalized_email = normalize_email(email)
         email_hash = hash_secret(normalized_email)
+        logger.info(
+            "signup_received request_id={} email_hash={} idempotency_key_hash={}",
+            request_id,
+            email_hash[:16],
+            hash_secret(idempotency_key)[:16],
+        )
         payload_hash = request_hash(
             {
                 "email": normalized_email,
@@ -412,20 +596,21 @@ class AuthService:
             keycloak_sub = user.keycloak_sub or await self._keycloak.create_user(
                 email=normalized_email,
                 display_name=display_name,
-                required_actions=["VERIFY_EMAIL", "UPDATE_PASSWORD"],
+                required_actions=[],
             )
             if user.keycloak_sub is None:
                 user = await self._user_repository.link_keycloak_subject(
                     user_id=user.id,
                     keycloak_sub=keycloak_sub,
                 )
+            await self._keycloak.clear_required_actions(user_id=keycloak_sub)
             await self._auth_repository.write_outbox_event(
                 event_type="signup.created",
                 aggregate_type="user",
                 aggregate_id=user.id,
                 payload={"created_via": "email", "account_mode": account_mode},
             )
-            await self._keycloak.send_account_setup_email(user_id=keycloak_sub)
+            await self._keycloak.send_verification_email(user_id=keycloak_sub)
             await self._user_repository.mark_verification_sent(user_id=user.id)
             await self._auth_repository.write_outbox_event(
                 event_type="signup.verification_email_sent",
@@ -452,6 +637,7 @@ class AuthService:
             raise
 
         await self._store_signup_idempotency(idempotency_hash, payload_hash, generic, email_hash)
+        logger.info("signup_committed request_id={} email_hash={}", request_id, email_hash[:16])
         return generic
 
     async def resend_signup_email(
@@ -461,10 +647,22 @@ class AuthService:
         request: Request,
     ) -> SignupResult:
         """Resend verification/setup email with cooldown and generic response."""
+        request_id = request_id_from(request)
         normalized_email = normalize_email(email)
         email_hash = hash_secret(normalized_email)
+        logger.info(
+            "signup_resend_received request_id={} email_hash={}",
+            request_id,
+            email_hash[:16],
+        )
         rate = await enforce_resend_rate_limit(email=normalized_email)
         if not rate.allowed:
+            logger.warning(
+                "signup_resend_skipped request_id={} email_hash={} reason={}",
+                request_id,
+                email_hash[:16],
+                rate.reason,
+            )
             await self._record_event(
                 AuthSecurityEventType.SUSPICIOUS_ACTIVITY,
                 request=request,
@@ -488,12 +686,31 @@ class AuthService:
                 "restricted",
             }
         ):
+            logger.info(
+                "signup_resend_skipped request_id={} email_hash={} reason={}",
+                request_id,
+                email_hash[:16],
+                "user_not_eligible",
+            )
             return SignupResult()
         if _verification_cooldown_active(user.last_verification_sent_at):
+            logger.info(
+                "signup_resend_skipped request_id={} email_hash={} reason={}",
+                request_id,
+                email_hash[:16],
+                "cooldown_active",
+            )
             return SignupResult()
         if user.verification_send_count >= settings.auth.signup_max_verification_sends:
+            logger.info(
+                "signup_resend_skipped request_id={} email_hash={} reason={}",
+                request_id,
+                email_hash[:16],
+                "max_sends_reached",
+            )
             return SignupResult()
 
+        await self._keycloak.clear_required_actions(user_id=user.keycloak_sub)
         await self._keycloak.send_verification_email(user_id=user.keycloak_sub)
         await self._user_repository.mark_verification_sent(user_id=user.id)
         await self._auth_repository.write_outbox_event(
@@ -502,19 +719,32 @@ class AuthService:
             aggregate_id=user.id,
             payload={"resend": True},
         )
+        logger.info(
+            "signup_resend_sent request_id={} user_id={} email_hash={}",
+            request_id,
+            user.id,
+            email_hash[:16],
+        )
         return SignupResult()
 
     async def start_social_signup(
         self,
         *,
         identity_provider: str,
-        account_mode: str,
+        account_mode: str | None,
         device_fingerprint: str,
         captcha_token: str | None,
         post_signin_redirect_uri: str | None,
         request: Request,
     ) -> SigninStartResult:
         """Begin social signup and store signup intent in OAuth state."""
+        request_id = request_id_from(request)
+        logger.info(
+            "social_signup_start_received request_id={} identity_provider={} account_mode={}",
+            request_id,
+            identity_provider,
+            account_mode,
+        )
         await self._guard_signup_abuse(
             email=None,
             device_fingerprint=device_fingerprint,
@@ -540,6 +770,12 @@ class AuthService:
             account_mode=account_mode,
             identity_provider=identity_provider,
         )
+        logger.info(
+            "social_signup_state_created request_id={} identity_provider={} expires_at={}",
+            request_id,
+            identity_provider,
+            expires_at,
+        )
         return SigninStartResult(
             authorization_url=self._keycloak.authorization_url(
                 state=state,
@@ -561,9 +797,35 @@ class AuthService:
         request: Request,
     ) -> SigninCallbackResult:
         """Exchange auth code and create a server-side app session."""
-        request_id = _request_id(request)
+        request_id = request_id_from(request)
         logger.info("signin_callback_received request_id={}", request_id)
         signin_state = await self._consume_signin_state(state)
+        redirect_uri = signin_state.post_signin_redirect_uri
+        try:
+            return await self._complete_signin_callback(
+                code=code,
+                signin_state=signin_state,
+                request=request,
+                request_id=request_id,
+            )
+        except AuthenticationError as exc:
+            if isinstance(exc, SigninCallbackError):
+                raise
+            raise SigninCallbackError(
+                exc.message,
+                code=exc.code,
+                post_signin_redirect_uri=redirect_uri,
+            ) from exc
+
+    async def _complete_signin_callback(
+        self,
+        *,
+        code: str,
+        signin_state: SigninState,
+        request: Request,
+        request_id: str,
+    ) -> SigninCallbackResult:
+        """Run token exchange, activation, and session creation for OAuth callback."""
         verifier = self._cipher.decrypt(signin_state.code_verifier_encrypted)
         if verifier is None:
             raise AuthenticationError("Invalid signin state")
@@ -616,6 +878,7 @@ class AuthService:
             session=session,
             post_signin_redirect_uri=signin_state.post_signin_redirect_uri,
             principal=principal,
+            user=user,
         )
 
     @observe_service("auth")
@@ -626,6 +889,13 @@ class AuthService:
         request: Request,
     ) -> str:
         """Revoke one local BFF session and return a Keycloak logout URL."""
+        request_id = request_id_from(request)
+        logger.info(
+            "logout_received request_id={} session_id={} user_id={}",
+            request_id,
+            session.id,
+            session.user_id,
+        )
         await self._auth_repository.revoke_session(
             session_id=session.id,
             user_id=session.user_id,
@@ -638,6 +908,12 @@ class AuthService:
             keycloak_sub=session.keycloak_sub,
         )
         AUTH_LOGOUT_TOTAL.inc()
+        logger.info(
+            "logout_session_revoked request_id={} session_id={} user_id={}",
+            request_id,
+            session.id,
+            session.user_id,
+        )
         id_token = self._cipher.decrypt(session.id_token_encrypted)
         return self._keycloak.logout_url(
             id_token_hint=id_token,
@@ -646,7 +922,13 @@ class AuthService:
 
     async def forgot_password(self, *, email: str, request: Request) -> None:
         """Trigger Keycloak reset email with a generic external response."""
+        request_id = request_id_from(request)
         email_hash = hash_secret(email.lower().strip())
+        logger.info(
+            "forgot_password_received request_id={} email_hash={}",
+            request_id,
+            email_hash[:16],
+        )
         await self._record_event(
             AuthSecurityEventType.FORGOT_PASSWORD_REQUESTED,
             request=request,
@@ -654,11 +936,40 @@ class AuthService:
         )
         sent = await self._keycloak.send_password_reset_email(email=email)
         if sent:
+            log_domain_event(PASSWORD_RESET_TRIGGERED, request_id=request_id)
             await self._record_event(
                 AuthSecurityEventType.FORGOT_PASSWORD_EMAIL_SENT,
                 request=request,
                 email_hash=email_hash,
             )
+            logger.info(
+                "forgot_password_email_sent request_id={} email_hash={}",
+                request_id,
+                email_hash[:16],
+            )
+
+    @observe_service("auth")
+    async def delete_account(
+        self,
+        *,
+        principal_sub: str,
+        request: Request,
+    ) -> None:
+        """Delete Keycloak account and local user records."""
+        request_id = request_id_from(request)
+        await self._keycloak.delete_user(user_id=principal_sub)
+        deleted = await self._user_repository.delete_by_keycloak_sub(principal_sub)
+        await self._record_event(
+            AuthSecurityEventType.ACCOUNT_DELETED,
+            request=request,
+            user_id=deleted.id if deleted else None,
+            keycloak_sub=principal_sub,
+        )
+        logger.info(
+            "account_deleted request_id={} keycloak_sub={}",
+            request_id,
+            principal_sub,
+        )
 
     async def _activate_or_reject_signin(
         self,
@@ -677,7 +988,7 @@ class AuthService:
                 display_name=(
                     principal.display_name or principal.preferred_username or principal.email
                 ),
-                account_mode=signin_state.account_mode or "messenger",
+                account_mode=signin_state.account_mode,
                 created_via=signin_state.identity_provider or "email",
             )
         decision = decide_account_linking(
@@ -697,13 +1008,18 @@ class AuthService:
                 keycloak_sub=principal.sub,
             )
             raise AuthenticationError("Account linking confirmation is required")
-        if existing.keycloak_sub is None:
+        if existing.keycloak_sub != principal.sub and existing.status == "pending_verification":
+            existing = await self._user_repository.link_keycloak_subject(
+                user_id=existing.id,
+                keycloak_sub=principal.sub,
+            )
+        elif existing.keycloak_sub is None:
             existing = await self._user_repository.link_keycloak_subject(
                 user_id=existing.id,
                 keycloak_sub=principal.sub,
             )
         if existing.status == "pending_verification":
-            request_id = _request_id(request)
+            request_id = request_id_from(request)
             logger.info(
                 "activation_attempted request_id={} user_id={} keycloak_sub={} "
                 "email_verified={} status={}",
@@ -721,17 +1037,11 @@ class AuthService:
                     principal.sub,
                     "email_not_verified_in_token",
                 )
-                raise AuthenticationError("Email verification is required before signin")
-            failure_reason = _activation_failure_reason(existing, principal)
-            if failure_reason == "profile_incomplete":
-                logger.warning(
-                    "activation_failed request_id={} user_id={} keycloak_sub={} reason={}",
-                    request_id,
-                    existing.id,
-                    principal.sub,
-                    failure_reason,
+                raise AuthenticationError(
+                    "Email verification is required before signin",
+                    code="email_verification_required",
                 )
-                raise AuthenticationError("Email verification is required before signin")
+            failure_reason = _activation_failure_reason(existing, principal)
             activated = await self._user_repository.activate_after_verified_signin(
                 keycloak_sub=principal.sub,
                 email=normalize_email(principal.email),
@@ -745,7 +1055,18 @@ class AuthService:
                     principal.sub,
                     failure_reason or "activation_lookup_failed",
                 )
-                raise AuthenticationError("Email verification is required before signin")
+                if principal.email_verified:
+                    raise AuthenticationError(
+                        (
+                            "We couldn't finish setting up your account. "
+                            "Please try again or contact support."
+                        ),
+                        code="account_activation_failed",
+                    )
+                raise AuthenticationError(
+                    "Email verification is required before signin",
+                    code="email_verification_required",
+                )
             logger.info(
                 "activation_succeeded request_id={} user_id={} keycloak_sub={} status={}",
                 request_id,
@@ -780,6 +1101,13 @@ class AuthService:
         request: Request,
     ) -> None:
         """Revoke one session owned by the current user."""
+        request_id = request_id_from(request)
+        logger.info(
+            "session_revoke_received request_id={} session_id={} user_id={}",
+            request_id,
+            session_id,
+            user_id,
+        )
         session = await self._auth_repository.revoke_session(session_id=session_id, user_id=user_id)
         if session is None:
             raise AuthorizationError("Session not found")
@@ -790,6 +1118,12 @@ class AuthService:
             user_id=user_id,
             keycloak_sub=session.keycloak_sub,
         )
+        logger.info(
+            "session_revoked request_id={} session_id={} user_id={}",
+            request_id,
+            session_id,
+            user_id,
+        )
 
     async def revoke_all_sessions(
         self,
@@ -799,6 +1133,13 @@ class AuthService:
         request: Request,
     ) -> int:
         """Revoke all sessions for a user, optionally preserving the current one."""
+        request_id = request_id_from(request)
+        logger.info(
+            "session_revoke_all_received request_id={} user_id={} keep_session_id={}",
+            request_id,
+            user_id,
+            keep_session_id,
+        )
         sessions = await self._auth_repository.revoke_all_sessions(
             user_id=user_id,
             keep_session_id=keep_session_id,
@@ -811,6 +1152,12 @@ class AuthService:
             user_id=user_id,
             metadata={"count": len(sessions), "keep_current": keep_session_id is not None},
         )
+        logger.info(
+            "session_revoke_all_committed request_id={} user_id={} revoked_count={}",
+            request_id,
+            user_id,
+            len(sessions),
+        )
         return len(sessions)
 
     async def _consume_signin_state(self, state: str) -> SigninState:
@@ -821,6 +1168,22 @@ class AuthService:
             LOGIN_FAILURE_TOTAL.labels(reason="invalid_state").inc()
             raise AuthenticationError("Invalid or expired signin state")
         return signin_state
+
+    async def _guard_password_signin_abuse(self, *, request: Request) -> None:
+        ip_address = request.client.host if request.client else "unknown"
+        rate = await enforce_signup_rate_limits(
+            ip_address=ip_address,
+            device_fingerprint=ip_address,
+            email=None,
+            social=False,
+        )
+        if not rate.allowed:
+            await self._record_event(
+                AuthSecurityEventType.SUSPICIOUS_ACTIVITY,
+                request=request,
+                metadata={"reason": rate.reason, "flow": "password_signin"},
+            )
+            raise AuthenticationError("Sign-in is temporarily unavailable")
 
     async def _guard_signup_abuse(
         self,
@@ -937,6 +1300,12 @@ class AuthService:
             user_agent_hash=hash_optional(user_agent),
         )
         AUTH_SESSION_CREATED_TOTAL.inc()
+        logger.info(
+            "session_created request_id={} user_id={} session_id={}",
+            request_id_from(request),
+            user.id,
+            session.id,
+        )
         return session
 
     async def _record_event(
@@ -963,19 +1332,12 @@ class AuthService:
         )
 
 
-def _request_id(request: Request) -> str | None:
-    """Return the correlation request id attached by middleware."""
-    return getattr(request.state, "request_id", None)
-
-
 def _activation_failure_reason(existing: User, principal: KeycloakPrincipal) -> str | None:
     """Return a diagnostic reason when pending verification activation cannot proceed."""
     if not principal.email_verified:
         return "email_not_verified_in_token"
     if existing.keycloak_sub and existing.keycloak_sub != principal.sub:
         return "keycloak_sub_mismatch"
-    if existing.display_name is None or existing.account_mode is None:
-        return "profile_incomplete"
     if existing.status != "pending_verification":
         return "status_not_pending"
     return "activation_lookup_failed"

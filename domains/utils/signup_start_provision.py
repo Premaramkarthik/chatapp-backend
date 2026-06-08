@@ -86,6 +86,8 @@ class SignupStartProvisioner:
                 keycloak_sub=keycloak_sub,
             )
 
+        await self._keycloak.clear_required_actions(user_id=keycloak_sub)
+
         await self._auth_repository.write_outbox_event(
             event_type="signup.created",
             aggregate_type="user",
@@ -107,19 +109,6 @@ class SignupStartProvisioner:
             keycloak_sub,
         )
 
-        signup_token = generate_token()
-        expires_at = expires_in(settings.auth.signup_session_ttl_sec)
-        session = await self._auth_repository.create_signup_session(
-            user_id=user.id,
-            token_hash=hash_secret(signup_token),
-            expires_at=expires_at,
-        )
-        logger.info(
-            "signup_session_created request_id={} user_id={} signup_session_id={}",
-            request_id,
-            user.id,
-            session.id,
-        )
         await self._auth_repository.write_outbox_event(
             event_type="signup.verification_email_sent",
             aggregate_type="user",
@@ -127,10 +116,14 @@ class SignupStartProvisioner:
             payload={},
         )
 
-        result = SignupStartResult(
-            signup_token=signup_token,
+        signup_token = generate_token()
+        expires_at = expires_in(settings.auth.signup_session_ttl_sec)
+        await self._auth_repository.create_signup_session(
+            user_id=user.id,
+            token_hash=hash_secret(signup_token),
             expires_at=expires_at,
         )
+        result = SignupStartResult(signup_token=signup_token, expires_at=expires_at)
         return user, result, keycloak_sub
 
     async def mark_provision_failure(self, *, user: User) -> None:

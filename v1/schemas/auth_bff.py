@@ -9,12 +9,43 @@ from uuid import UUID
 from pydantic import BaseModel, EmailStr, Field, SecretStr, field_validator, model_validator
 
 from domains.auth.password_policy import validate_signup_password
+from v1.schemas.users import UserResponse
 
 
 class SigninStartRequest(BaseModel):
     """Request to begin an OAuth2 authorization-code signin."""
 
     post_signin_redirect_uri: str | None = None
+    identity_provider: Literal["google", "apple"] | None = None
+    account_mode: Literal["traveler", "messenger"] | None = None
+    device_fingerprint: str | None = Field(default=None, min_length=8, max_length=256)
+    captcha_token: str | None = Field(default=None, max_length=2048)
+
+
+class SigninPasswordRequest(BaseModel):
+    """Request to sign in with email and password via the BFF."""
+
+    email: EmailStr
+    password: SecretStr = Field(min_length=1, max_length=128)
+
+
+class SigninPasswordResponse(BaseModel):
+    """Password sign-in success response."""
+
+    status: str = "ok"
+    user: UserResponse
+
+
+class OnboardingCompleteRequest(BaseModel):
+    """Complete post-verification onboarding profile."""
+
+    display_name: str = Field(min_length=1, max_length=120)
+    account_mode: Literal["traveler", "messenger"]
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        return " ".join(value.strip().split())
 
 
 class SigninStartResponse(BaseModel):
@@ -53,7 +84,7 @@ class SignupCompleteRequest(BaseModel):
 
     signup_token: str = Field(min_length=16, max_length=512)
     display_name: str = Field(min_length=1, max_length=120)
-    account_mode: Literal["traveler", "messenger", "both"]
+    account_mode: Literal["traveler", "messenger"]
 
     @field_validator("display_name")
     @classmethod
@@ -66,7 +97,7 @@ class SignupRequest(BaseModel):
 
     email: EmailStr
     display_name: str = Field(min_length=1, max_length=120)
-    account_mode: Literal["traveler", "messenger", "both"]
+    account_mode: Literal["traveler", "messenger"]
     device_fingerprint: str = Field(min_length=8, max_length=256)
     captcha_token: str | None = Field(default=None, max_length=2048)
     post_signin_redirect_uri: str | None = None
@@ -87,7 +118,7 @@ class SocialSignupStartRequest(BaseModel):
     """Begin social signup with captured app account mode."""
 
     identity_provider: Literal["google", "apple"]
-    account_mode: Literal["traveler", "messenger", "both"]
+    account_mode: Literal["traveler", "messenger"]
     device_fingerprint: str = Field(min_length=8, max_length=256)
     captcha_token: str | None = Field(default=None, max_length=2048)
     post_signin_redirect_uri: str | None = None
@@ -110,7 +141,7 @@ class SignupStartResponse(BaseModel):
     """Signup step 1 response."""
 
     status: str = "accepted"
-    next_step: str = "complete_profile"
+    next_step: str = "verify_email"
     signup_token: str | None = None
     expires_at: datetime | None = None
 

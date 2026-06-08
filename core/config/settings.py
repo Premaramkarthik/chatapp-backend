@@ -1,13 +1,18 @@
-"""Application settings loaded from environment variables and .env files."""
+"""Application settings loaded from config.yaml, environment variables, and .env."""
 
 from pathlib import Path
 
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from core.config.loader import apply_yaml_defaults_to_env, validate_production_settings
+
 REPO_ROOT = Path(__file__).resolve().parents[2]
+YAML_CONFIG_PATH = REPO_ROOT / "config.yaml"
 
 ENV_FILES = (REPO_ROOT / ".env",)
+
+apply_yaml_defaults_to_env(YAML_CONFIG_PATH)
 
 
 class EnvSettings(BaseSettings):
@@ -40,7 +45,19 @@ class LoggingSettings(EnvSettings):
 
     level: str = Field("INFO", alias="LOG_LEVEL")
     file: str = Field("logs/backend.log", alias="LOG_FILE")
-    json_logs: bool = Field(False, alias="LOG_JSON")
+
+
+class HttpSettings(EnvSettings):
+    """Outbound HTTP client settings."""
+
+    timeout_seconds: float = Field(30.0, alias="HTTP_TIMEOUT_SECONDS")
+    retry_attempts: int = Field(3, alias="HTTP_RETRY_ATTEMPTS")
+
+
+class JwtSettings(EnvSettings):
+    """JWT validation settings (Keycloak JWKS)."""
+
+    clock_leeway_sec: int = Field(30, alias="JWT_CLOCK_LEEWAY_SEC")
 
 
 class ObservabilitySettings(EnvSettings):
@@ -72,9 +89,9 @@ class MiddlewareSettings(EnvSettings):
     auth_protected_prefixes_raw: str = Field("/v1", alias="MIDDLEWARE_AUTH_PROTECTED_PREFIXES")
     auth_public_paths_raw: str = Field(
         "/health/live,/health/ready,/metrics,/docs,/redoc,/openapi.json,/v1/system/version,"
-        "/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/forgot-password,"
-        "/v1/auth/signup,/v1/auth/signup/start,/v1/auth/signup/complete,"
-        "/v1/auth/signup/resend,/v1/auth/signup/social/start",
+        "/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/signin/password,"
+        "/v1/auth/forgot-password,/v1/auth/signup,/v1/auth/signup/start,"
+        "/v1/auth/signup/complete,/v1/auth/signup/resend,/v1/auth/signup/social/start",
         alias="MIDDLEWARE_AUTH_PUBLIC_PATHS",
     )
     auth_public_prefixes_raw: str = Field("/internal", alias="MIDDLEWARE_AUTH_PUBLIC_PREFIXES")
@@ -99,9 +116,9 @@ class MiddlewareSettings(EnvSettings):
     security_headers_enabled: bool = Field(True, alias="MIDDLEWARE_SECURITY_HEADERS_ENABLED")
     csrf_excluded_paths_raw: str = Field(
         "/health/live,/health/ready,/metrics,/docs,/redoc,/openapi.json,/v1/system/version,"
-        "/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/forgot-password,"
-        "/v1/auth/signup,/v1/auth/signup/start,/v1/auth/signup/complete,"
-        "/v1/auth/signup/resend,/v1/auth/signup/social/start,"
+        "/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/signin/password,"
+        "/v1/auth/forgot-password,/v1/auth/signup,/v1/auth/signup/start,"
+        "/v1/auth/signup/complete,/v1/auth/signup/resend,/v1/auth/signup/social/start,"
         "/internal/tinode/auth",
         alias="MIDDLEWARE_CSRF_EXCLUDED_PATHS",
     )
@@ -197,7 +214,7 @@ class KeycloakSettings(EnvSettings):
     """Keycloak OpenID Connect settings."""
 
     enabled: bool = Field(True, alias="KEYCLOAK_ENABLED")
-    base_url: str = Field("http://localhost:8080", alias="KEYCLOAK_BASE_URL")
+    base_url: str = Field("http://localhost:8180", alias="KEYCLOAK_BASE_URL")
     public_base_url: str = Field("", alias="KEYCLOAK_PUBLIC_BASE_URL")
     internal_base_url: str = Field("", alias="KEYCLOAK_INTERNAL_BASE_URL")
     issuer_url: str = Field("", alias="KEYCLOAK_ISSUER_URL")
@@ -217,6 +234,33 @@ class KeycloakSettings(EnvSettings):
         SecretStr("change-me"),
         alias="KEYCLOAK_ADMIN_CLIENT_SECRET",
     )
+    google_idp_alias: str = Field("google", alias="KEYCLOAK_GOOGLE_IDP_ALIAS")
+    google_client_id: str = Field("", alias="KEYCLOAK_GOOGLE_CLIENT_ID")
+    google_client_secret: SecretStr = Field(
+        SecretStr(""),
+        alias="KEYCLOAK_GOOGLE_CLIENT_SECRET",
+    )
+    google_idp_hide_on_login_page: bool = Field(
+        True,
+        alias="KEYCLOAK_GOOGLE_IDP_HIDE_ON_LOGIN_PAGE",
+    )
+    auto_bootstrap: bool = Field(False, alias="KEYCLOAK_AUTO_BOOTSTRAP")
+    bootstrap_admin: str = Field("admin", alias="KEYCLOAK_BOOTSTRAP_ADMIN")
+    bootstrap_admin_password: SecretStr = Field(
+        SecretStr("admin"),
+        alias="KEYCLOAK_BOOTSTRAP_ADMIN_PASSWORD",
+    )
+    smtp_host: str = Field("", alias="KEYCLOAK_SMTP_HOST")
+    smtp_port: str = Field("587", alias="KEYCLOAK_SMTP_PORT")
+    smtp_from: str = Field("", alias="KEYCLOAK_SMTP_FROM")
+    smtp_from_display_name: str = Field(
+        "PariPath ChatApp",
+        alias="KEYCLOAK_SMTP_FROM_DISPLAY_NAME",
+    )
+    smtp_user: str = Field("", alias="KEYCLOAK_SMTP_USER")
+    smtp_password: SecretStr = Field(SecretStr(""), alias="KEYCLOAK_SMTP_PASSWORD")
+    smtp_starttls: str = Field("true", alias="KEYCLOAK_SMTP_STARTTLS")
+    smtp_ssl: str = Field("false", alias="KEYCLOAK_SMTP_SSL")
 
     @property
     def algorithms(self) -> list[str]:
@@ -290,6 +334,21 @@ class KeycloakSettings(EnvSettings):
         """Return plain admin client secret."""
         return self.admin_client_secret.get_secret_value()
 
+    @property
+    def bootstrap_admin_password_value(self) -> str:
+        """Return plain Keycloak master admin password for bootstrap."""
+        return self.bootstrap_admin_password.get_secret_value()
+
+    @property
+    def smtp_password_value(self) -> str:
+        """Return plain SMTP password for Keycloak realm configuration."""
+        return self.smtp_password.get_secret_value()
+
+    @property
+    def google_client_secret_value(self) -> str:
+        """Return plain Google OAuth client secret for Keycloak IdP configuration."""
+        return self.google_client_secret.get_secret_value()
+
 
 class AuthSettings(EnvSettings):
     """BFF authentication and session settings."""
@@ -310,6 +369,12 @@ class AuthSettings(EnvSettings):
         "http://localhost:3000",
         alias="AUTH_ALLOWED_REDIRECT_ORIGINS",
     )
+    email_verify_redirect_url: str = Field(
+        "http://localhost:5173/home/verify-email/complete",
+        alias="AUTH_EMAIL_VERIFY_REDIRECT_URL",
+    )
+    signin_password_ip_limit: int = Field(20, alias="AUTH_SIGNIN_PASSWORD_IP_LIMIT")
+    signin_password_ip_window_sec: int = Field(60, alias="AUTH_SIGNIN_PASSWORD_IP_WINDOW_SEC")
     cookie_name: str = Field("pp_session", alias="AUTH_COOKIE_NAME")
     csrf_cookie_name: str = Field("pp_csrf", alias="AUTH_CSRF_COOKIE_NAME")
     csrf_header_name: str = Field("X-CSRF-Token", alias="AUTH_CSRF_HEADER_NAME")
@@ -399,6 +464,7 @@ class RedisSettings(EnvSettings):
 
     enabled: bool = Field(True, alias="REDIS_ENABLED")
     url: str = Field("redis://localhost:6379/0", alias="REDIS_URL")
+    cache_ttl_sec: int = Field(3600, alias="REDIS_CACHE_TTL_SEC")
     socket_timeout_sec: float = Field(1.0, alias="REDIS_SOCKET_TIMEOUT_SEC")
     connect_timeout_sec: float = Field(1.0, alias="REDIS_CONNECT_TIMEOUT_SEC")
 
@@ -456,6 +522,8 @@ class Settings:
     def __init__(self) -> None:
         self.app = AppSettings()
         self.logging = LoggingSettings()
+        self.http = HttpSettings()
+        self.jwt = JwtSettings()
         self.observability = ObservabilitySettings()
         self.middleware = MiddlewareSettings()
         self.database = DatabaseSettings()
@@ -464,6 +532,17 @@ class Settings:
         self.redis = RedisSettings()
         self.tinode = TinodeSettings()
         self.meilisearch = MeilisearchSettings()
+        validate_production_settings(
+            environment=self.app.environment,
+            debug=self.app.debug,
+        )
+        from core.logging.domain_events import CONFIGURATION_LOADED, log_domain_event
+
+        log_domain_event(
+            CONFIGURATION_LOADED,
+            environment=self.app.environment,
+            keycloak_enabled=self.keycloak.enabled,
+        )
 
 
 settings = Settings()

@@ -1,28 +1,4 @@
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-
-CREATE TABLE IF NOT EXISTS geo_countries (
-    iso_alpha2 CHAR(2) PRIMARY KEY,
-    name TEXT NOT NULL,
-    region TEXT,
-    is_active BOOLEAN NOT NULL DEFAULT true,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
-
-CREATE TABLE IF NOT EXISTS geo_cities (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    country_iso CHAR(2) NOT NULL REFERENCES geo_countries(iso_alpha2),
-    name TEXT NOT NULL,
-    admin1_code TEXT,
-    latitude NUMERIC(9, 6),
-    longitude NUMERIC(9, 6),
-    slug TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT geo_cities_country_slug_unique UNIQUE (country_iso, slug)
-);
-
-CREATE INDEX IF NOT EXISTS idx_geo_cities_country ON geo_cities(country_iso);
-CREATE INDEX IF NOT EXISTS idx_geo_cities_name_trgm ON geo_cities USING gin (name gin_trgm_ops);
-
+-- Geographic reference seed data (idempotent).
 INSERT INTO geo_countries (iso_alpha2, name, region) VALUES
     ('US', 'United States', 'Americas'),
     ('GB', 'United Kingdom', 'Europe'),

@@ -56,8 +56,29 @@ class MigrationError(DatabaseError):
 class AuthenticationError(AppError):
     """Base exception for authentication and identity failures."""
 
-    def __init__(self, message: str, context: dict[str, Any] | None = None) -> None:
-        super().__init__(message=message, code="authentication_error", context=context)
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "authentication_error",
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message=message, code=code, context=context)
+
+
+class SigninCallbackError(AuthenticationError):
+    """Authentication failure during OAuth callback with a safe browser redirect target."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        code: str = "authentication_error",
+        post_signin_redirect_uri: str,
+        context: dict[str, Any] | None = None,
+    ) -> None:
+        super().__init__(message, code=code, context=context)
+        self.post_signin_redirect_uri = post_signin_redirect_uri
 
 
 class AuthorizationError(AppError):

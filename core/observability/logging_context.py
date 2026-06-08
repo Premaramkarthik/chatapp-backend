@@ -5,8 +5,6 @@ from __future__ import annotations
 from contextvars import ContextVar
 from typing import Any
 
-from core.config.settings import settings
-
 request_id_var: ContextVar[str | None] = ContextVar("request_id", default=None)
 correlation_id_var: ContextVar[str | None] = ContextVar("correlation_id", default=None)
 user_id_var: ContextVar[str | None] = ContextVar("user_id", default=None)
@@ -81,7 +79,11 @@ def _trace_context() -> dict[str, str | None]:
 
 def observability_log_patcher(record: dict[str, Any]) -> None:
     """Inject observability fields into every log record."""
+    from core.config.settings import settings
+
     extra = record["extra"]
+    if not extra.get("logger_name"):
+        extra["logger_name"] = record["name"]
     trace_ctx = _trace_context()
     extra.setdefault("service_name", settings.observability.service_name)
     extra.setdefault("environment", settings.app.environment)

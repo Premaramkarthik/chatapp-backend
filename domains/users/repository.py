@@ -73,3 +73,17 @@ class UserRepository(Protocol):
     ) -> User | None:
         """Complete signup profile fields for a pending user."""
         ...
+
+    async def complete_onboarding(
+        self,
+        *,
+        user_id: str,
+        display_name: str,
+        account_mode: str,
+    ) -> User | None:
+        """Complete onboarding for a pending_profile_setup user."""
+        ...
+
+    async def delete_by_keycloak_sub(self, keycloak_sub: str) -> User | None:
+        """Delete the local user row for a Keycloak subject."""
+        ...

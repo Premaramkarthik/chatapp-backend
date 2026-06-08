@@ -2,26 +2,35 @@
 
 from __future__ import annotations
 
-from typing import Annotated
+import base64
+import json
+from datetime import datetime
+from typing import Annotated, Any
+from urllib.parse import urlencode
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
 from fastapi.responses import RedirectResponse
 
 from core.config.settings import settings
 from domains.auth import AuthService, AuthSession
+from domains.users.bootstrap import BootstrapUser
+from domains.users.user import BootstrapUserCommand
 from v1.dependencies.auth import (
     get_current_auth_session,
     get_current_principal,
     require_capability,
 )
-from v1.dependencies.container import get_auth_service
+from v1.dependencies.container import get_auth_service, get_bootstrap_user_use_case
 from v1.schemas.auth_bff import (
     ForgotPasswordRequest,
     GenericAuthResponse,
     LogoutResponse,
+    OnboardingCompleteRequest,
     RevokeAllSessionsRequest,
     RevokeAllSessionsResponse,
     SessionResponse,
+    SigninPasswordRequest,
+    SigninPasswordResponse,
     SigninStartRequest,
     SigninStartResponse,
     SignupAcceptedResponse,
@@ -34,10 +43,14 @@ from v1.schemas.auth_bff import (
     SocialSignupStartRequest,
 )
 from v1.schemas.principal import KeycloakPrincipal
+from v1.schemas.users import UserResponse
+from v1.utils.base import AuthenticationError, SigninCallbackError
+from v1.utils.request_context import request_id_from
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
 AuthServiceDependency = Annotated[AuthService, Depends(get_auth_service)]
+BootstrapUserUseCase = Annotated[BootstrapUser, Depends(get_bootstrap_user_use_case)]
 CurrentPrincipal = Annotated[KeycloakPrincipal, Depends(get_current_principal)]
 CurrentSession = Annotated[AuthSession, Depends(get_current_auth_session)]
 SessionManager = Annotated[KeycloakPrincipal, Depends(require_capability("session:manage"))]
@@ -52,6 +65,10 @@ async def signin_start(
     """Begin Authorization Code + PKCE signin."""
     result = await auth_service.start_signin(
         post_signin_redirect_uri=payload.post_signin_redirect_uri,
+        identity_provider=payload.identity_provider,
+        account_mode=payload.account_mode,
+        device_fingerprint=payload.device_fingerprint,
+        captcha_token=payload.captcha_token,
         request=request,
     )
     return SigninStartResponse(
@@ -59,6 +76,59 @@ async def signin_start(
         state=result.state,
         expires_at=result.expires_at,
     )
+
+
+@router.post("/signin/password", response_model=SigninPasswordResponse)
+async def signin_password(
+    payload: SigninPasswordRequest,
+    request: Request,
+    response: Response,
+    auth_service: AuthServiceDependency,
+) -> SigninPasswordResponse:
+    """Sign in with email and password; sets BFF session cookies."""
+    result = await auth_service.signin_password(
+        email=str(payload.email),
+        password=payload.password.get_secret_value(),
+        request=request,
+    )
+    _set_auth_cookies(response, result.session_token, result.csrf_token)
+    return SigninPasswordResponse(user=UserResponse.model_validate(result.user.to_dict()))
+
+
+@router.get("/session", response_model=UserResponse)
+async def auth_session(
+    request: Request,
+    principal: CurrentPrincipal,
+    bootstrap_user: BootstrapUserUseCase,
+) -> dict:
+    """Return the logged-in user for the current session cookie."""
+    display_name = principal.display_name or principal.preferred_username
+    user = await bootstrap_user.execute(
+        BootstrapUserCommand(
+            keycloak_sub=principal.sub,
+            email=principal.email,
+            display_name=display_name,
+        ),
+        request_id=request_id_from(request),
+    )
+    return user.to_dict()
+
+
+@router.post("/onboarding/complete", response_model=UserResponse)
+async def onboarding_complete(
+    payload: OnboardingCompleteRequest,
+    request: Request,
+    principal: CurrentPrincipal,
+    auth_service: AuthServiceDependency,
+) -> dict:
+    """Complete onboarding profile and role selection."""
+    user = await auth_service.complete_onboarding(
+        keycloak_sub=principal.sub,
+        display_name=payload.display_name,
+        account_mode=payload.account_mode,
+        request=request,
+    )
+    return user.to_dict()
 
 
 @router.post("/signup/start", response_model=SignupStartResponse, status_code=202)
@@ -115,8 +185,8 @@ async def signup(
     raise HTTPException(
         status_code=status.HTTP_410_GONE,
         detail=(
-            "POST /v1/auth/signup is deprecated; use /v1/auth/signup/start "
-            "and /v1/auth/signup/complete"
+            "POST /v1/auth/signup is deprecated; "
+            "use /v1/auth/signup/start and /v1/auth/signup/complete"
         ),
     )
 
@@ -162,10 +232,25 @@ async def signin_callback(
     state: str = Query(...),
 ) -> RedirectResponse:
     """Complete Keycloak signin callback and set BFF cookies."""
-    result = await auth_service.handle_callback(code=code, state=state, request=request)
-    response = RedirectResponse(result.post_signin_redirect_uri, status_code=303)
-    _set_auth_cookies(response, result.session_token, result.csrf_token)
-    return response
+    redirect_uri = settings.auth.default_post_signin_redirect_url
+    try:
+        result = await auth_service.handle_callback(code=code, state=state, request=request)
+        redirect_target = _redirect_with_user_payload(
+            result.post_signin_redirect_uri,
+            result.user.to_dict(),
+        )
+        response = RedirectResponse(redirect_target, status_code=303)
+        _set_auth_cookies(response, result.session_token, result.csrf_token)
+        return response
+    except SigninCallbackError as exc:
+        redirect_uri = exc.post_signin_redirect_uri
+        query = urlencode({"auth_error": exc.code, "auth_message": exc.message})
+        separator = "&" if "?" in redirect_uri else "?"
+        return RedirectResponse(f"{redirect_uri}{separator}{query}", status_code=303)
+    except AuthenticationError as exc:
+        query = urlencode({"auth_error": exc.code, "auth_message": exc.message})
+        separator = "&" if "?" in redirect_uri else "?"
+        return RedirectResponse(f"{redirect_uri}{separator}{query}", status_code=303)
 
 
 @router.post("/logout", response_model=LogoutResponse)
@@ -246,6 +331,24 @@ async def revoke_session(
         request=request,
     )
     return GenericAuthResponse()
+
+
+def _json_default(value: Any) -> str:
+    if isinstance(value, datetime):
+        return value.isoformat()
+    raise TypeError(f"Object of type {type(value)!r} is not JSON serializable")
+
+
+def _redirect_with_user_payload(redirect_uri: str, user: dict) -> str:
+    """Append signed-in user JSON to the redirect URL hash for immediate client login."""
+    payload = (
+        base64.urlsafe_b64encode(
+            json.dumps(user, default=_json_default, separators=(",", ":")).encode(),
+        )
+        .decode()
+        .rstrip("=")
+    )
+    return f"{redirect_uri}#u={payload}"
 
 
 def _set_auth_cookies(response: Response, session_token: str, csrf_token: str) -> None:

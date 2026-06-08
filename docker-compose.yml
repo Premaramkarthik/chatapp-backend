@@ -10,10 +10,10 @@ services:
   #     DB_NAME: ${DB_NAME:-chatapp}
   #     REDIS_ENABLED: ${REDIS_ENABLED:-true}
   #     REDIS_URL: redis://redis:6379/0
-  #     KEYCLOAK_BASE_URL: http://localhost:8080
-  #     KEYCLOAK_PUBLIC_BASE_URL: ${KEYCLOAK_PUBLIC_BASE_URL:-http://localhost:8080}
+  #     KEYCLOAK_BASE_URL: http://localhost:8180
+  #     KEYCLOAK_PUBLIC_BASE_URL: ${KEYCLOAK_PUBLIC_BASE_URL:-http://localhost:8180}
   #     KEYCLOAK_INTERNAL_BASE_URL: http://keycloak:8080
-  #     KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://localhost:8080/realms/${KEYCLOAK_REALM:-chatapp}}
+  #     KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://localhost:8180/realms/${KEYCLOAK_REALM:-chatapp}}
   #     KEYCLOAK_REALM: ${KEYCLOAK_REALM:-chatapp}
   #     KEYCLOAK_AUDIENCE: ${KEYCLOAK_AUDIENCE:-chatapp-api}
   #     KEYCLOAK_WEB_CLIENT_ID: ${KEYCLOAK_WEB_CLIENT_ID:-chatapp-web}
@@ -97,10 +97,10 @@ services:
 
   keycloak:
     image: quay.io/keycloak/keycloak:26.0
-    command: ["start-dev", "--import-realm"]
+    command: ["start-dev"]
     environment:
-      KEYCLOAK_ADMIN: admin
-      KEYCLOAK_ADMIN_PASSWORD: admin
+      KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
+      KC_BOOTSTRAP_ADMIN_PASSWORD: ${KC_BOOTSTRAP_ADMIN_PASSWORD:-admin}
       KC_DB: postgres
       KC_DB_URL_HOST: postgres
       KC_DB_URL_DATABASE: keycloak
@@ -112,9 +112,8 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "8080:8080"
-    volumes:
-      - ./docker/keycloak/realm-chatapp.json:/opt/keycloak/data/import/realm-chatapp.json:ro
+      - "${KEYCLOAK_HOST_PORT:-8180}:8080"
+
 
   redis:
     image: redis:7-alpine
@@ -193,6 +192,7 @@ services:
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
       PGADMIN_CONFIG_SERVER_MODE: "False"
       PGADMIN_CONFIG_MASTER_PASSWORD_REQUIRED: "False"
+      PGADMIN_SERVER_JSON_FILE: /pgadmin4/servers.json
     depends_on:
       postgres:
         condition: service_healthy
@@ -284,8 +284,8 @@ services:
 volumes:
   postgres_data:
   redis_data:
-  meili_data:
   pgadmin_data:
+  meili_data:
   prometheus_data:
   grafana_data:
   loki_data:

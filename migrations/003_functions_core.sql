@@ -1,123 +1,73 @@
-ALTER TABLE users
-ALTER COLUMN keycloak_sub DROP NOT NULL;
-
-ALTER TABLE users
-ADD COLUMN IF NOT EXISTS email_verified BOOLEAN NOT NULL DEFAULT false,
-ADD COLUMN IF NOT EXISTS created_via TEXT NOT NULL DEFAULT 'email',
-ADD COLUMN IF NOT EXISTS last_verification_sent_at TIMESTAMPTZ,
-ADD COLUMN IF NOT EXISTS verification_send_count INT NOT NULL DEFAULT 0,
-ADD COLUMN IF NOT EXISTS onboarding_completed_at TIMESTAMPTZ,
-ADD COLUMN IF NOT EXISTS tos_accepted_at TIMESTAMPTZ;
-
-DROP INDEX IF EXISTS idx_users_email;
-CREATE UNIQUE INDEX IF NOT EXISTS idx_users_email_unique
-ON users(lower(email))
-WHERE email IS NOT NULL;
-
-DO $$
+-- Core domain functions: health, users (modes 1-14), tinode mappings, signup sessions.
+CREATE OR REPLACE FUNCTION set_updated_at()
+RETURNS TRIGGER
+LANGUAGE plpgsql
+AS $$
 BEGIN
-    IF EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'users_status_check'
-    ) THEN
-        ALTER TABLE users DROP CONSTRAINT users_status_check;
-    END IF;
-
-    ALTER TABLE users
-    ADD CONSTRAINT users_status_check
-    CHECK (
-        status IN (
-            'pending_verification',
-            'pending_profile_setup',
-            'active',
-            'restricted',
-            'suspended',
-            'deleted'
-        )
-    );
-
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'users_created_via_check'
-    ) THEN
-        ALTER TABLE users
-        ADD CONSTRAINT users_created_via_check
-        CHECK (created_via IN ('email', 'google', 'apple', 'admin'));
-    END IF;
+    NEW.updated_at = now();
+    RETURN NEW;
 END;
 $$;
 
-CREATE INDEX IF NOT EXISTS idx_users_email_verified ON users(email_verified);
-CREATE INDEX IF NOT EXISTS idx_users_created_via ON users(created_via);
-
-ALTER TABLE oauth_signin_states
-ADD COLUMN IF NOT EXISTS flow_type TEXT NOT NULL DEFAULT 'signin',
-ADD COLUMN IF NOT EXISTS account_mode TEXT,
-ADD COLUMN IF NOT EXISTS identity_provider TEXT,
-ADD COLUMN IF NOT EXISTS email_hash TEXT;
-
-DO $$
+CREATE OR REPLACE FUNCTION fn_health(mode INT, payload JSONB DEFAULT '{}'::jsonb)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1
-        FROM pg_constraint
-        WHERE conname = 'oauth_signin_states_flow_type_check'
-    ) THEN
-        ALTER TABLE oauth_signin_states
-        ADD CONSTRAINT oauth_signin_states_flow_type_check
-        CHECK (flow_type IN ('signin', 'signup'));
+    IF mode = 1 THEN
+        RETURN jsonb_build_object('ok', true, 'database_time', now());
     END IF;
+
+    RAISE EXCEPTION 'fn_health unknown mode: %', mode;
 END;
 $$;
 
-CREATE INDEX IF NOT EXISTS idx_oauth_signin_states_flow_type
-ON oauth_signin_states(flow_type);
+CREATE OR REPLACE FUNCTION fn_tinode_user_mappings(mode INT, payload JSONB DEFAULT '{}'::jsonb)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    result tinode_user_mappings%ROWTYPE;
+BEGIN
+    IF mode = 1 THEN
+        IF NULLIF(payload->>'user_id', '') IS NULL THEN
+            RAISE EXCEPTION 'user_id is required';
+        END IF;
+        IF NULLIF(payload->>'tinode_user_id', '') IS NULL THEN
+            RAISE EXCEPTION 'tinode_user_id is required';
+        END IF;
 
-CREATE TABLE IF NOT EXISTS auth_idempotency_keys (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    idempotency_key_hash TEXT NOT NULL UNIQUE,
-    request_hash TEXT NOT NULL,
-    response_body JSONB NOT NULL,
-    status_code INT NOT NULL,
-    email_hash TEXT,
-    expires_at TIMESTAMPTZ NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+        INSERT INTO tinode_user_mappings (user_id, tinode_user_id)
+        VALUES ((payload->>'user_id')::uuid, payload->>'tinode_user_id')
+        ON CONFLICT (user_id) DO UPDATE
+        SET
+            tinode_user_id = EXCLUDED.tinode_user_id,
+            updated_at = now()
+        RETURNING * INTO result;
 
-CREATE INDEX IF NOT EXISTS idx_auth_idempotency_keys_expires_at
-ON auth_idempotency_keys(expires_at);
+        RETURN to_jsonb(result);
 
-CREATE TABLE IF NOT EXISTS auth_outbox_events (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    event_type TEXT NOT NULL,
-    aggregate_type TEXT NOT NULL,
-    aggregate_id TEXT,
-    payload JSONB NOT NULL DEFAULT '{}'::jsonb,
-    published_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+    ELSIF mode = 2 THEN
+        SELECT * INTO result
+        FROM tinode_user_mappings
+        WHERE user_id = (payload->>'user_id')::uuid
+        LIMIT 1;
 
-CREATE INDEX IF NOT EXISTS idx_auth_outbox_events_unpublished
-ON auth_outbox_events(created_at)
-WHERE published_at IS NULL;
+        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
 
-CREATE TABLE IF NOT EXISTS signup_sessions (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    token_hash TEXT NOT NULL UNIQUE,
-    step_completed INT NOT NULL DEFAULT 1 CHECK (step_completed IN (1, 2)),
-    expires_at TIMESTAMPTZ NOT NULL,
-    revoked_at TIMESTAMPTZ,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
-);
+    ELSIF mode = 3 THEN
+        SELECT tum.* INTO result
+        FROM tinode_user_mappings tum
+        JOIN users u ON u.id = tum.user_id
+        WHERE u.keycloak_sub = payload->>'keycloak_sub'
+        LIMIT 1;
 
-CREATE INDEX IF NOT EXISTS idx_signup_sessions_user_id ON signup_sessions(user_id);
-CREATE INDEX IF NOT EXISTS idx_signup_sessions_expires_at ON signup_sessions(expires_at);
-CREATE INDEX IF NOT EXISTS idx_signup_sessions_active
-ON signup_sessions(token_hash)
-WHERE revoked_at IS NULL;
+        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
+    END IF;
+
+    RAISE EXCEPTION 'fn_tinode_user_mappings unknown mode: %', mode;
+END;
+$$;
 
 CREATE OR REPLACE FUNCTION fn_signup_sessions(mode INT, payload JSONB DEFAULT '{}'::jsonb)
 RETURNS JSONB
@@ -264,7 +214,11 @@ BEGIN
         UPDATE users
         SET keycloak_sub = payload->>'keycloak_sub'
         WHERE id = (payload->>'user_id')::uuid
-          AND (keycloak_sub IS NULL OR keycloak_sub = payload->>'keycloak_sub')
+          AND (
+              keycloak_sub IS NULL
+              OR keycloak_sub = payload->>'keycloak_sub'
+              OR status = 'pending_verification'
+          )
         RETURNING * INTO result;
 
         RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
@@ -291,9 +245,22 @@ BEGIN
           AND status = 'pending_verification'
         LIMIT 1;
 
-        IF result.id IS NULL
-           OR result.display_name IS NULL
-           OR result.account_mode IS NULL THEN
+        IF result.id IS NULL THEN
+            SELECT * INTO result
+            FROM users
+            WHERE lower(email) = lower(payload->>'email')
+              AND status = 'pending_verification'
+            LIMIT 1;
+
+            IF result.id IS NOT NULL THEN
+                UPDATE users
+                SET keycloak_sub = payload->>'keycloak_sub'
+                WHERE id = result.id
+                RETURNING * INTO result;
+            END IF;
+        END IF;
+
+        IF result.id IS NULL THEN
             RETURN NULL;
         END IF;
 
@@ -332,6 +299,33 @@ BEGIN
             onboarding_completed_at = now()
         WHERE id = (payload->>'user_id')::uuid
           AND status = 'pending_verification'
+        RETURNING * INTO result;
+
+        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
+
+    ELSIF mode = 13 THEN
+        IF NULLIF(payload->>'display_name', '') IS NULL THEN
+            RAISE EXCEPTION 'display_name is required';
+        END IF;
+        IF payload->>'account_mode' NOT IN ('traveler', 'messenger') THEN
+            RAISE EXCEPTION 'invalid account_mode';
+        END IF;
+
+        UPDATE users
+        SET
+            display_name = payload->>'display_name',
+            account_mode = payload->>'account_mode',
+            onboarding_completed_at = now(),
+            status = 'active'
+        WHERE id = (payload->>'user_id')::uuid
+          AND status = 'pending_profile_setup'
+        RETURNING * INTO result;
+
+        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
+
+    ELSIF mode = 14 THEN
+        DELETE FROM users
+        WHERE keycloak_sub = payload->>'keycloak_sub'
         RETURNING * INTO result;
 
         RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;

@@ -17,7 +17,7 @@ class UserResponse(BaseModel):
     email: EmailStr | None = None
     display_name: str | None = None
     status: str
-    account_mode: str = "messenger"
+    account_mode: str | None = None
     email_verified: bool = False
     created_via: str = "email"
     onboarding_completed_at: datetime | None = None
@@ -29,7 +29,7 @@ class UserResponse(BaseModel):
 class AccountModeUpdateRequest(BaseModel):
     """Request body for changing business account mode."""
 
-    account_mode: Literal["traveler", "messenger", "both"] = Field(
+    account_mode: Literal["traveler", "messenger"] = Field(
         ...,
         description="Business account mode. This is app state, not a Keycloak role.",
     )

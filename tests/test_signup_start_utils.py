@@ -57,7 +57,7 @@ def test_signup_start_result_from_mapping_parses_expires_at() -> None:
     result = signup_start_result_from_mapping(
         {
             "status": "accepted",
-            "next_step": "complete_profile",
+            "next_step": "verify_email",
             "signup_token": "token-abc",
             "expires_at": "2026-06-02T12:00:00+00:00",
         }
@@ -70,4 +70,4 @@ def test_signup_start_result_from_mapping_parses_expires_at() -> None:
 def test_build_signup_start_idempotency_body_omits_optional_fields() -> None:
     body = build_signup_start_idempotency_body(SignupStartResult())
 
-    assert body == {"status": "accepted", "next_step": "complete_profile"}
+    assert body == {"status": "accepted", "next_step": "verify_email"}

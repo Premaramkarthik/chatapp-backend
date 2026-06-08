@@ -13,6 +13,10 @@ from domains.auth.jwks import jwks_refresh_manager
 from domains.auth.verification_reconcile import run_verification_reconcile_loop
 from domains.search.outbox_worker import run_search_outbox_loop
 from infrastructure.database.connection import close_db, init_db
+from infrastructure.keycloak.google_idp_config import ensure_keycloak_google_idp
+from infrastructure.keycloak.realm_bootstrap import ensure_keycloak_realm
+from infrastructure.keycloak.smtp_config import ensure_keycloak_smtp
+from infrastructure.keycloak.startup_validation import validate_keycloak_startup
 from infrastructure.meilisearch.client import get_meilisearch_client
 from infrastructure.meilisearch.index_settings import ensure_traveler_index_settings
 from infrastructure.redis.cache import auth_redis_cache
@@ -23,17 +27,17 @@ from v1.routers import auth, chat, connections, health, internal, travelers, use
 @asynccontextmanager
 async def lifespan(_: FastAPI) -> AsyncIterator[None]:
     """Initialize and close process-level resources."""
-    setup_logger(
-        settings.logging.file,
-        settings.logging.level,
-        json_logs=settings.logging.json_logs,
-    )
     outbox_stop = asyncio.Event()
     outbox_task: asyncio.Task[None] | None = None
     reconcile_stop = asyncio.Event()
     reconcile_task: asyncio.Task[None] | None = None
     if not settings.app.skip_startup_integrations:
         await init_db()
+        if settings.keycloak.enabled:
+            await ensure_keycloak_realm()
+            await ensure_keycloak_smtp()
+            await ensure_keycloak_google_idp()
+            await validate_keycloak_startup()
         jwks_refresh_manager.start()
         if settings.meilisearch.enabled:
             client = get_meilisearch_client()
@@ -72,6 +76,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 
 def create_app() -> FastAPI:
     """Create a configured FastAPI app."""
+    setup_logger(settings.logging.file, settings.logging.level)
     api = FastAPI(
         title=settings.app.name,
         version=settings.app.version,

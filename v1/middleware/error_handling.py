@@ -49,15 +49,13 @@ class ErrorHandlingMiddleware:
             request_id = state_value(scope, REQUEST_ID_STATE_KEY)
             status_code = _status_for_app_error(exc)
             logger.warning(
-                {
-                    "event": "app_error",
-                    "code": exc.code,
-                    "status_code": status_code,
-                    "request_id": request_id,
-                    "path": scope.get("path"),
-                    "method": scope.get("method"),
-                    "detail": exc.message,
-                }
+                "app_error code={} status_code={} request_id={} method={} path={} detail={}",
+                exc.code,
+                status_code,
+                request_id,
+                scope.get("method"),
+                scope.get("path"),
+                exc.message,
             )
             await self._send_error(
                 scope,

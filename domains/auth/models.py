@@ -38,6 +38,7 @@ class AuthSecurityEventType(StrEnum):
     SIGNUP_ACTIVATED = "signup_activated"
     SIGNUP_DISPOSABLE_EMAIL_BLOCKED = "signup_disposable_email_blocked"
     ACCOUNT_LINKING_REQUIRED = "account_linking_required"
+    ACCOUNT_DELETED = "account_deleted"
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,7 +83,7 @@ class SignupStartResult:
     """Result returned after signup step 1."""
 
     status: str = "accepted"
-    next_step: str = "complete_profile"
+    next_step: str = "verify_email"
     signup_token: str | None = None
     expires_at: datetime | None = None
 

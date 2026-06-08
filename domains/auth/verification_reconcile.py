@@ -40,8 +40,6 @@ async def reconcile_pending_verifications_once(*, batch_size: int | None = None)
         FROM users
         WHERE status = 'pending_verification'
           AND keycloak_sub IS NOT NULL
-          AND display_name IS NOT NULL
-          AND account_mode IS NOT NULL
         ORDER BY created_at ASC
         LIMIT $1
         """,

@@ -125,3 +125,27 @@ class PostgresUserRepository(UserRepository):
         """Restrict a local user after signup orchestration failure."""
         row = await call_json_function("fn_users", 11, {"user_id": user_id})
         return User.from_mapping(row)
+
+    async def complete_onboarding(
+        self,
+        *,
+        user_id: str,
+        display_name: str,
+        account_mode: str,
+    ) -> User | None:
+        """Complete onboarding for a user in pending_profile_setup."""
+        row = await call_json_function(
+            "fn_users",
+            13,
+            {
+                "user_id": user_id,
+                "display_name": display_name,
+                "account_mode": account_mode,
+            },
+        )
+        return None if row is None else User.from_mapping(row)
+
+    async def delete_by_keycloak_sub(self, keycloak_sub: str) -> User | None:
+        """Delete the local user row for a Keycloak subject."""
+        row = await call_json_function("fn_users", 14, {"keycloak_sub": keycloak_sub})
+        return None if row is None else User.from_mapping(row)

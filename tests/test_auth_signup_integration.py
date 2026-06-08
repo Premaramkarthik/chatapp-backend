@@ -104,7 +104,7 @@ async def _keycloak_user(keycloak_sub: str) -> dict[str, Any]:
 
 
 @pytest.mark.asyncio
-async def test_signup_start_and_complete_persist_expected_db_state(
+async def test_signup_start_persist_expected_db_state(
     integration_client: AsyncClient,
 ) -> None:
     email = f"signup-{uuid.uuid4()}@example.com"
@@ -123,9 +123,11 @@ async def test_signup_start_and_complete_persist_expected_db_state(
         assert start_response.status_code == 202
         start_body = start_response.json()
         assert start_body["status"] == "accepted"
-        assert start_body["next_step"] == "complete_profile"
-        assert start_body["signup_token"]
-        assert start_body["expires_at"]
+        assert start_body["next_step"] == "verify_email"
+        signup_token = start_body.get("signup_token")
+        assert signup_token is not None
+        assert len(signup_token) >= 16
+        assert start_body.get("expires_at") is not None
 
         user = await _fetch_user(email)
         assert user is not None
@@ -138,36 +140,14 @@ async def test_signup_start_and_complete_persist_expected_db_state(
 
         session = await _fetch_signup_session(str(user["id"]))
         assert session is not None
+        assert session["token_hash"] == hash_secret(signup_token)
         assert session["step_completed"] == 1
         assert session["revoked_at"] is None
-        assert session["token_hash"] == hash_secret(start_body["signup_token"])
 
         kc_user = await _keycloak_user(keycloak_sub)
         assert kc_user["email"] == email
         assert kc_user["emailVerified"] is False
         assert "UPDATE_PASSWORD" not in kc_user.get("requiredActions", [])
-
-        complete_response = await integration_client.post(
-            "/v1/auth/signup/complete",
-            json={
-                "signup_token": start_body["signup_token"],
-                "display_name": "Integration User",
-                "account_mode": "both",
-            },
-        )
-        assert complete_response.status_code == 200
-        assert complete_response.json() == {"status": "ok", "next_step": "verify_email"}
-
-        user = await _fetch_user(email)
-        assert user is not None
-        assert user["display_name"] == "Integration User"
-        assert user["account_mode"] == "both"
-        assert user["onboarding_completed_at"] is not None
-        assert user["status"] == "pending_verification"
-
-        session = await _fetch_signup_session(str(user["id"]))
-        assert session is not None
-        assert session["step_completed"] == 2 or session["revoked_at"] is not None
     finally:
         await _cleanup_signup(email, keycloak_sub)
 
@@ -211,18 +191,6 @@ async def test_signup_activation_after_keycloak_email_verified(
             },
         )
         assert start_response.status_code == 202
-        start_body = start_response.json()
-
-        complete_response = await integration_client.post(
-            "/v1/auth/signup/complete",
-            json={
-                "signup_token": start_body["signup_token"],
-                "display_name": "Activation Test User",
-                "account_mode": "messenger",
-            },
-        )
-        assert complete_response.status_code == 200
-
         user = await _fetch_user(email)
         assert user is not None
         keycloak_sub = str(user["keycloak_sub"])
@@ -241,12 +209,13 @@ async def test_signup_activation_after_keycloak_email_verified(
         )
         assert activated is not None
         assert activated.email_verified is True
-        assert activated.status == "active"
+        assert activated.status == "pending_profile_setup"
 
         user = await _fetch_user(email)
         assert user is not None
         assert user["email_verified"] is True
-        assert user["status"] == "active"
+        assert user["status"] == "pending_profile_setup"
+        assert user["onboarding_completed_at"] is None
     finally:
         await _cleanup_signup(email, keycloak_sub)
 

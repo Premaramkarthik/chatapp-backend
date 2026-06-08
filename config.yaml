@@ -1,0 +1,72 @@
+app:
+  name: chatapp API
+  environment: local
+  version: "0.1.0"
+  debug: true
+  skip_startup_integrations: false
+
+logging:
+  level: INFO
+  file: logs/backend.log
+
+observability:
+  enabled: true
+  service_name: chatapp-backend
+  otlp_endpoint: http://localhost:4317
+  otlp_insecure: true
+  traces_sample_rate: 1.0
+  metrics_enabled: true
+  correlation_header: X-Correlation-ID
+
+http:
+  timeout_seconds: 30
+  retry_attempts: 3
+
+jwt:
+  audience: chatapp-api
+  algorithms: RS256
+  jwks_cache_ttl: 300
+  jwks_refresh_interval_sec: 240
+  stale_jwks_ttl_sec: 900
+  clock_leeway_sec: 30
+
+keycloak:
+  enabled: true
+  auto_bootstrap: true
+  base_url: http://localhost:8180
+  public_base_url: http://localhost:8180
+  internal_base_url: http://localhost:8180
+  issuer_url: http://localhost:8180/realms/chatapp
+  realm: chatapp
+  web_client_id: chatapp-web
+  admin_client_id: chatapp-backend-admin
+  google_idp_alias: google
+
+redis:
+  enabled: true
+  cache_ttl: 3600
+  socket_timeout_sec: 1.0
+  connect_timeout_sec: 1.0
+
+database:
+  host: localhost
+  port: 5433
+  user: chatapp
+  name: chatapp
+  pool_min: 1
+  pool_max: 10
+
+middleware:
+  rate_limit_enabled: true
+  rate_limit_requests: 120
+  rate_limit_window_sec: 60
+
+auth:
+  callback_url: http://localhost:8000/v1/auth/signin/callback
+  email_verify_redirect_url: http://localhost:5173/home/verify-email/complete
+  reset_email_lifespan_sec: 900
+  session_idle_sec: 1800
+  session_max_sec: 43200
+  signup_min_password_length: 12
+  default_signup_roles: profile:update,session:manage,message:send,message:create-room,trip:create,trip:update,trip:join
+  verification_reconcile_enabled: true

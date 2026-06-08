@@ -147,7 +147,7 @@ chatapp-backend/
 │   ├── schemas/                    # Pydantic request/response models
 │   └── utils/                      # Exception hierarchy
 │
-├── migrations/                     # Idempotent SQL migrations (001–010)
+├── migrations/                     # Idempotent SQL migrations (001–007); see docs/migrations/
 ├── scripts/                        # Migration runner, commit validator
 └── tests/                          # pytest-asyncio test suite
 ```
@@ -169,16 +169,19 @@ chatapp-backend/
 git clone <repo-url> && cd chatapp-backend
 cp .env.example .env   # Edit secrets for local dev
 
-# 2. Launch full stack (Postgres, Redis, Keycloak, Tinode, Meilisearch, PgAdmin)
+# 2. Launch full stack (Postgres, Redis, Keycloak, Tinode, Meilisearch)
 docker compose up -d
 
-# 3. Configure Keycloak SMTP (Gmail App Password in .env)
+# 3. One-time Keycloak setup (realm, clients, roles) — see docs/keycloak-setup-guide.md
+#    Startup validation will fail until chatapp-web, chatapp-api, and service account are configured.
+
+# 4. Optional: configure Keycloak SMTP (ops script, not required at runtime)
 uv run python scripts/configure_keycloak_smtp.py
 
-# 4. Run database migrations
+# 5. Run database migrations
 uv run python scripts/run_migrations.py
 
-# 5. Start the API server
+# 6. Start the API server
 uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000
 ```
 
@@ -202,15 +205,15 @@ curl http://localhost:8000/health/ready    # → checks all dependencies
 |---|---|
 | `http://localhost:8000/docs` | Swagger UI |
 | `http://localhost:8000/redoc` | ReDoc |
-| `http://localhost:8080` | Keycloak Admin Console |
-| `http://localhost:5050` | PgAdmin |
+| `http://localhost:8180` | Keycloak Admin Console |
+| `http://localhost:8081` | Adminer (with `--profile tools`) |
 | `http://localhost:7700` | Meilisearch Dashboard |
 
 ---
 
 ## Configuration Reference
 
-All configuration is driven by environment variables loaded via Pydantic Settings. See `.env.example` for the full reference.
+Non-sensitive defaults live in [`config.yaml`](config.yaml). Secrets and connection URLs belong in `.env`. Environment variables override YAML. See [`docs/configuration-guide.md`](docs/configuration-guide.md) and `.env.example`.
 
 ### Critical Variables
 
@@ -250,27 +253,29 @@ uv run python scripts/run_migrations.py              # Apply pending
 uv run python scripts/run_migrations.py --database-url "postgres://..."  # Override DSN
 ```
 
+Audit notes, dependency graph, and deployment guidance: [`docs/migrations/`](docs/migrations/).
+
+**Existing databases** that applied the legacy 15-file chain must be re-baselined before running the consolidated files — see [`docs/migrations/deployment-risk.md`](docs/migrations/deployment-risk.md).
+
 ### Migration Inventory
 
-| File | Tables / Changes |
+| File | Layer |
 |---|---|
-| `001` | `users`, `tinode_user_mappings` |
-| `002` | `geo_countries`, `geo_cities` |
-| `003` | `oauth_signin_states`, `auth_sessions`, `auth_security_events`, `auth_device_fingerprints`, `fn_users` |
-| `004` | Signup lifecycle columns, `signup_sessions`, `auth_idempotency_keys`, `auth_outbox_events`, extended `fn_users` (modes 6–12), `fn_signup_sessions` |
-| `005` | `fn_tinode_user_mappings`, `fn_health` |
-| `006` | `traveler_profiles`, `messenger_profiles`, `user_privacy_settings` |
-| `007` | `travel_plans`, `travel_plan_destinations`, `traveler_current_locations` |
-| `008` | `traveler_discovery_snapshots`, `connection_requests`, `user_connections`, `user_blocks` |
-| `009` | `tinode_conversation_mappings` |
-| `010` | `search_outbox_events` |
+| `001_extensions.sql` | `pgcrypto`, `pg_trgm` |
+| `002_tables.sql` | 23 tables, indexes, constraints (final shape) |
+| `003_functions_core.sql` | `fn_users` (modes 1–14), `fn_signup_sessions`, `fn_tinode_user_mappings`, `fn_health`, `set_updated_at` |
+| `004_functions_social.sql` | Social/discovery/connection/travel/outbox `fn_*` helpers |
+| `005_functions_chat.sql` | `fn_tinode_conversation_mappings` (modes 1–5) |
+| `006_triggers.sql` | 10 `updated_at` triggers |
+| `007_seeds_geo.sql` | Geo reference seed data |
 
 ### Stored Functions
 
 Business-critical operations use **mode-based JSONB stored functions** for atomic, consistent database interactions:
 
-- **`fn_users(mode, payload)`** — modes including signup create (7), profile complete (12), activate after verified signin (10)
+- **`fn_users(mode, payload)`** — signup create (7), Keycloak relink (8), activate after verified signin (10), profile complete (12), onboarding step (13), delete by sub (14)
 - **`fn_tinode_user_mappings(mode, payload)`** — Upsert and lookup Tinode user links
+- **`fn_tinode_conversation_mappings(mode, payload)`** — Provision, inbox list, update, archive
 - **`fn_health(mode, payload)`** — Database liveness probe
 
 ### Connection Pool
@@ -438,8 +443,12 @@ Outbox worker that syncs `traveler_discovery_snapshots` to Meilisearch in batche
 
 ### Keycloak (`infrastructure/keycloak/`)
 
-- `KeycloakVerifier` — JWKS-based JWT verification with `PyJWKClient` caching
-- `KeycloakAuthClient` — Admin API for user CRUD, email actions, role management
+- `KeycloakVerifier` — JWKS verification with Redis cache and stale fallback
+- `KeycloakAdminClient` — Admin REST for user CRUD, email actions, role management
+- `KeycloakAuthClient` — OIDC flows (auth code, refresh, password grant)
+- `startup_validation` — fail-fast checks when `KEYCLOAK_ENABLED=true`
+
+Setup: [`docs/keycloak-setup-guide.md`](docs/keycloak-setup-guide.md). Migration: [`docs/keycloak-migration-checklist.md`](docs/keycloak-migration-checklist.md).
 - Health check via OIDC discovery endpoint
 
 ### Tinode (`infrastructure/tinode/`)
@@ -496,10 +505,9 @@ docker compose --profile observability up -d prometheus grafana loki promtail te
 | Tempo | OTLP gRPC localhost:4317 |
 | Loki | http://localhost:3100 |
 
-Configure the API for tracing and JSON logs:
+Configure the API for tracing:
 
 ```bash
-LOG_JSON=true
 OTEL_EXPORTER_OTLP_ENDPOINT=http://localhost:4317
 OTEL_SERVICE_NAME=chatapp-backend
 OTEL_TRACES_SAMPLER_ARG=0.1   # production: lower sample rate
@@ -507,7 +515,7 @@ OTEL_TRACES_SAMPLER_ARG=0.1   # production: lower sample rate
 
 ### Logging
 
-- **Library**: Loguru with optional JSON serialization (`LOG_JSON=true`)
+- **Library**: Loguru with human-readable lines in console and `logs/backend.log`
 - **File**: Rotating 100MB files, 30-day retention at `logs/backend.log`
 - **Correlation**: `X-Request-ID` and optional `X-Correlation-ID` headers
 - **Trace linking**: OpenTelemetry injects `trace_id` / `span_id` into every log line
@@ -590,11 +598,11 @@ The `docker-compose.yml` orchestrates **8 services**:
 |---|---|---|
 | `postgres` | 5433 | Primary database |
 | `redis` | 6379 | Cache and rate limiting |
-| `keycloak` | 8080 | Identity provider |
+| `keycloak` | 8180 | Identity provider |
 | `tinode` | 6060 / 16060 | Chat engine (HTTP + gRPC) |
 | `meilisearch` | 7700 | Search engine |
 | `api` | 8000 | FastAPI application |
-| `pgadmin` | 5050 | Database administration |
+| `adminer` | 8081 | Database administration (`docker compose --profile tools up`) |
 | `tinode-init` | — | One-shot Tinode bootstrapper |
 
 ### Production Checklist
@@ -607,7 +615,6 @@ The `docker-compose.yml` orchestrates **8 services**:
 - [ ] Configure `AUTH_CAPTCHA_REQUIRED=true` for signup abuse protection
 - [ ] Set `MIDDLEWARE_CORS_ORIGINS` to production domains only
 - [ ] Mount persistent volumes for Postgres, Redis, Meilisearch data
-- [ ] Configure `LOG_JSON=true` for structured log ingestion
 - [ ] Set up Prometheus scraping of `/metrics` endpoint
 
 ---
@@ -669,7 +676,7 @@ AppError
 |---|---|
 | `DatabaseConnectionError` on startup | Verify Postgres is running and `DB_*` env vars are correct |
 | `TooManyConnectionsError` | Enable `DB_POOL_AUTO=true` or reduce `DB_POOL_MAX` |
-| Keycloak health check fails | Ensure Keycloak is running and realm is configured |
+| Keycloak health check fails | Complete one-time setup in `docs/keycloak-setup-guide.md`; check startup validation logs |
 | Redis fallback warnings in logs | Check Redis connectivity; the system degrades gracefully to in-memory |
 | Tinode provision fails | Verify both users have completed Tinode link (`fn_tinode_user_mappings`) |
 | Meilisearch search returns empty | Check outbox worker is running; verify `MEILI_ENABLED=true` |

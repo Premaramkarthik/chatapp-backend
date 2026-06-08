@@ -56,11 +56,11 @@ def setup_middleware(app: FastAPI) -> None:
             excluded_paths=settings.middleware.rate_limit_excluded_paths,
         )
 
+    app.add_middleware(ErrorHandlingMiddleware)
     app.add_middleware(
         RequestResponseLoggingMiddleware,
         log_request_body=settings.middleware.log_request_body,
     )
-    app.add_middleware(ErrorHandlingMiddleware)
     add_cors_middleware(app)
     if settings.middleware.security_headers_enabled:
         app.add_middleware(SecurityHeadersMiddleware)

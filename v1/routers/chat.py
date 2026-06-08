@@ -5,8 +5,9 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
+from core.logging.logger import get_logger
 from core.observability.prometheus_metrics import TINODE_PROVISION_TOTAL
 from domains.chat.provision import ProvisionError, provision_conversation_for_connection
 from domains.chat.session import TinodeSessionNotReadyError, build_tinode_session
@@ -24,6 +25,9 @@ from v1.schemas.chat import (
     TinodeSessionResponse,
 )
 from v1.schemas.principal import KeycloakPrincipal
+from v1.utils.request_context import request_id_from
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
 CurrentPrincipal = Annotated[KeycloakPrincipal, Depends(get_current_principal)]
@@ -62,17 +66,32 @@ async def _require_active_connection(connection_id: str, user_id: str) -> dict:
     summary="Obtain Tinode WebSocket login secret",
 )
 async def tinode_session(
+    request: Request,
     principal: CurrentPrincipal,
 ) -> TinodeSessionResponse:
     """Return base64 login secret and Tinode web URL for the authenticated user."""
+    request_id = request_id_from(request)
     user = await _local_user(principal)
+    logger.info("tinode_session_requested request_id={} user_id={}", request_id, user["id"])
     try:
         payload = await build_tinode_session(user=user)
     except TinodeSessionNotReadyError as exc:
+        logger.warning(
+            "tinode_session_failed request_id={} user_id={} reason={}",
+            request_id,
+            user["id"],
+            exc,
+        )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
+    logger.info(
+        "tinode_session_committed request_id={} user_id={} tinode_user_id={}",
+        request_id,
+        user["id"],
+        payload.get("tinode_user_id"),
+    )
     return TinodeSessionResponse(**payload)
 
 
@@ -128,17 +147,20 @@ async def get_conversation(
     summary="Provision Tinode P2P topic for a connection",
 )
 async def provision_conversation(
+    request: Request,
     payload: ConversationProvisionRequest,
     _: RoomCreator,
     principal: CurrentPrincipal,
 ) -> ConversationResponse:
     """Provision a Tinode topic mapping for an active connection."""
+    request_id = request_id_from(request)
     user = await _local_user(principal)
     connection = await _require_active_connection(str(payload.connection_id), user["id"])
     try:
         mapping = await provision_conversation_for_connection(
             connection=connection,
             created_by_user_id=user["id"],
+            request_id=request_id,
         )
         TINODE_PROVISION_TOTAL.labels(outcome="success").inc()
     except ProvisionError as exc:

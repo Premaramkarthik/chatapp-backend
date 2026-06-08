@@ -1,4 +1,4 @@
--- Mode-based functions for social tables (005-010).
+-- Social and discovery mode-based functions.
 -- Call via: SELECT fn_*(mode INT, payload JSONB)
 
 -- social_ordered_pair: (user_a_id, user_b_id) with user_a < user_b
@@ -871,59 +871,6 @@ BEGIN
     END IF;
 
     RAISE EXCEPTION 'fn_user_blocks unknown mode: %', mode;
-END;
-$$;
-
--- fn_tinode_conversation_mappings (table): 1=get, 2=provision
-CREATE OR REPLACE FUNCTION fn_tinode_conversation_mappings(mode INT, payload JSONB DEFAULT '{}'::jsonb)
-RETURNS JSONB
-LANGUAGE plpgsql
-AS $$
-DECLARE
-    result tinode_conversation_mappings%ROWTYPE;
-    cid UUID;
-    topic TEXT;
-BEGIN
-    cid := (payload->>'user_connection_id')::uuid;
-
-    IF mode = 1 THEN
-        SELECT * INTO result
-        FROM tinode_conversation_mappings
-        WHERE user_connection_id = cid;
-
-        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
-
-    ELSIF mode = 2 THEN
-        SELECT * INTO result
-        FROM tinode_conversation_mappings
-        WHERE user_connection_id = cid;
-
-        IF result.id IS NOT NULL THEN
-            RETURN to_jsonb(result);
-        END IF;
-
-        topic := 'pp_conn_' || cid::text;
-
-        INSERT INTO tinode_conversation_mappings (
-            user_connection_id,
-            tinode_topic_id,
-            tinode_topic_name,
-            created_by_user_id,
-            status
-        )
-        VALUES (
-            cid,
-            topic,
-            topic,
-            (payload->>'created_by_user_id')::uuid,
-            'active'
-        )
-        RETURNING * INTO result;
-
-        RETURN to_jsonb(result);
-    END IF;
-
-    RAISE EXCEPTION 'fn_tinode_conversation_mappings unknown mode: %', mode;
 END;
 $$;
 
