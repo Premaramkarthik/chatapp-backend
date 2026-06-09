@@ -6,7 +6,7 @@ from fastapi import HTTPException, status
 from starlette.responses import JSONResponse
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_exception, log_warning
 from domains.auth.password_policy import PasswordPolicyError
 from v1.middleware.state import REQUEST_ID_STATE_KEY, state_value
 from v1.utils.base import (
@@ -48,14 +48,15 @@ class ErrorHandlingMiddleware:
         except AppError as exc:
             request_id = state_value(scope, REQUEST_ID_STATE_KEY)
             status_code = _status_for_app_error(exc)
-            logger.warning(
-                "app_error code={} status_code={} request_id={} method={} path={} detail={}",
-                exc.code,
-                status_code,
-                request_id,
-                scope.get("method"),
-                scope.get("path"),
-                exc.message,
+            log_warning(
+                logger,
+                "Application error returned to client",
+                code=exc.code,
+                status_code=status_code,
+                request_id=request_id,
+                method=scope.get("method"),
+                path=scope.get("path"),
+                detail=exc.message,
             )
             await self._send_error(
                 scope,
@@ -68,11 +69,12 @@ class ErrorHandlingMiddleware:
             )
         except Exception as exc:
             request_id = state_value(scope, REQUEST_ID_STATE_KEY)
-            logger.exception(
-                "unhandled_request_error request_id={} error_type={} detail={}",
-                request_id,
-                type(exc).__name__,
-                exc,
+            log_exception(
+                logger,
+                "Unhandled error while processing HTTP request",
+                request_id=request_id,
+                error_type=type(exc).__name__,
+                detail=exc,
             )
             await self._send_error(
                 scope,

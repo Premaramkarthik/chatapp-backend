@@ -59,13 +59,20 @@ YAML_ENV_MAP: dict[tuple[str, ...], str] = {
     ("middleware", "rate_limit_requests"): "MIDDLEWARE_RATE_LIMIT_REQUESTS",
     ("middleware", "rate_limit_window_sec"): "MIDDLEWARE_RATE_LIMIT_WINDOW_SEC",
     ("auth", "callback_url"): "AUTH_CALLBACK_URL",
+    ("auth", "default_post_signin_redirect_url"): "AUTH_DEFAULT_POST_SIGNIN_REDIRECT_URL",
+    ("auth", "post_logout_redirect_url"): "AUTH_POST_LOGOUT_REDIRECT_URL",
+    ("auth", "allowed_redirect_origins"): "AUTH_ALLOWED_REDIRECT_ORIGINS",
     ("auth", "email_verify_redirect_url"): "AUTH_EMAIL_VERIFY_REDIRECT_URL",
+    ("auth", "password_reset_redirect_url"): "AUTH_PASSWORD_RESET_REDIRECT_URL",
     ("auth", "reset_email_lifespan_sec"): "AUTH_RESET_EMAIL_LIFESPAN_SEC",
+    ("auth", "email_verification_token_ttl_sec"): "AUTH_EMAIL_VERIFICATION_TOKEN_TTL_SEC",
     ("auth", "session_idle_sec"): "AUTH_SESSION_IDLE_SEC",
     ("auth", "session_max_sec"): "AUTH_SESSION_MAX_SEC",
+    ("auth", "remember_me_session_max_sec"): "AUTH_REMEMBER_ME_SESSION_MAX_SEC",
     ("auth", "signup_min_password_length"): "AUTH_SIGNUP_MIN_PASSWORD_LENGTH",
     ("auth", "default_signup_roles"): "AUTH_DEFAULT_SIGNUP_ROLES",
     ("auth", "verification_reconcile_enabled"): "AUTH_VERIFICATION_RECONCILE_ENABLED",
+    ("auth", "signup_resend_cooldown_sec"): "AUTH_SIGNUP_RESEND_COOLDOWN_SEC",
 }
 
 

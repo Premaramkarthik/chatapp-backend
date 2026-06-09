@@ -90,8 +90,9 @@ class MiddlewareSettings(EnvSettings):
     auth_public_paths_raw: str = Field(
         "/health/live,/health/ready,/metrics,/docs,/redoc,/openapi.json,/v1/system/version,"
         "/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/signin/password,"
-        "/v1/auth/forgot-password,/v1/auth/signup,/v1/auth/signup/start,"
-        "/v1/auth/signup/complete,/v1/auth/signup/resend,/v1/auth/signup/social/start",
+        "/v1/auth/forgot-password,/v1/auth/reset-password/complete,/v1/auth/signup,"
+        "/v1/auth/signup/start,/v1/auth/signup/complete,/v1/auth/signup/resend,"
+        "/v1/auth/signup/verify/complete,/v1/auth/signup/social/start",
         alias="MIDDLEWARE_AUTH_PUBLIC_PATHS",
     )
     auth_public_prefixes_raw: str = Field("/internal", alias="MIDDLEWARE_AUTH_PUBLIC_PREFIXES")
@@ -117,8 +118,9 @@ class MiddlewareSettings(EnvSettings):
     csrf_excluded_paths_raw: str = Field(
         "/health/live,/health/ready,/metrics,/docs,/redoc,/openapi.json,/v1/system/version,"
         "/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/signin/password,"
-        "/v1/auth/forgot-password,/v1/auth/signup,/v1/auth/signup/start,"
-        "/v1/auth/signup/complete,/v1/auth/signup/resend,/v1/auth/signup/social/start,"
+        "/v1/auth/forgot-password,/v1/auth/reset-password/complete,/v1/auth/signup,"
+        "/v1/auth/signup/start,/v1/auth/signup/complete,/v1/auth/signup/resend,"
+        "/v1/auth/signup/verify/complete,/v1/auth/signup/social/start,"
         "/internal/tinode/auth",
         alias="MIDDLEWARE_CSRF_EXCLUDED_PATHS",
     )
@@ -373,6 +375,10 @@ class AuthSettings(EnvSettings):
         "http://localhost:5173/home/verify-email/complete",
         alias="AUTH_EMAIL_VERIFY_REDIRECT_URL",
     )
+    password_reset_redirect_url: str = Field(
+        "http://localhost:8080/reset-password",
+        alias="AUTH_PASSWORD_RESET_REDIRECT_URL",
+    )
     signin_password_ip_limit: int = Field(20, alias="AUTH_SIGNIN_PASSWORD_IP_LIMIT")
     signin_password_ip_window_sec: int = Field(60, alias="AUTH_SIGNIN_PASSWORD_IP_WINDOW_SEC")
     cookie_name: str = Field("pp_session", alias="AUTH_COOKIE_NAME")
@@ -388,10 +394,18 @@ class AuthSettings(EnvSettings):
     signin_state_ttl_sec: int = Field(600, alias="AUTH_SIGNIN_STATE_TTL_SEC")
     session_idle_sec: int = Field(1800, alias="AUTH_SESSION_IDLE_SEC")
     session_max_sec: int = Field(43200, alias="AUTH_SESSION_MAX_SEC")
+    remember_me_session_max_sec: int = Field(
+        2592000,
+        alias="AUTH_REMEMBER_ME_SESSION_MAX_SEC",
+    )
     refresh_leeway_sec: int = Field(60, alias="AUTH_REFRESH_LEEWAY_SEC")
     session_cache_ttl_sec: int = Field(300, alias="AUTH_SESSION_CACHE_TTL_SEC")
     revoke_cache_ttl_sec: int = Field(43200, alias="AUTH_REVOKE_CACHE_TTL_SEC")
     reset_email_lifespan_sec: int = Field(900, alias="AUTH_RESET_EMAIL_LIFESPAN_SEC")
+    email_verification_token_ttl_sec: int = Field(
+        900,
+        alias="AUTH_EMAIL_VERIFICATION_TOKEN_TTL_SEC",
+    )
     captcha_required: bool = Field(False, alias="AUTH_CAPTCHA_REQUIRED")
     signup_idempotency_ttl_sec: int = Field(86400, alias="AUTH_SIGNUP_IDEMPOTENCY_TTL_SEC")
     signup_ip_limit: int = Field(5, alias="AUTH_SIGNUP_IP_LIMIT")
@@ -407,7 +421,7 @@ class AuthSettings(EnvSettings):
     )
     signup_social_ip_limit: int = Field(10, alias="AUTH_SIGNUP_SOCIAL_IP_LIMIT")
     signup_social_ip_window_sec: int = Field(60, alias="AUTH_SIGNUP_SOCIAL_IP_WINDOW_SEC")
-    signup_resend_cooldown_sec: int = Field(300, alias="AUTH_SIGNUP_RESEND_COOLDOWN_SEC")
+    signup_resend_cooldown_sec: int = Field(60, alias="AUTH_SIGNUP_RESEND_COOLDOWN_SEC")
     signup_max_verification_sends: int = Field(5, alias="AUTH_SIGNUP_MAX_VERIFICATION_SENDS")
     signup_session_ttl_sec: int = Field(1800, alias="AUTH_SIGNUP_SESSION_TTL_SEC")
     verification_reconcile_enabled: bool = Field(
@@ -536,10 +550,11 @@ class Settings:
             environment=self.app.environment,
             debug=self.app.debug,
         )
-        from core.logging.domain_events import CONFIGURATION_LOADED, log_domain_event
+        from core.logging.logger import get_logger, log_info
 
-        log_domain_event(
-            CONFIGURATION_LOADED,
+        log_info(
+            get_logger(__name__),
+            "Application configuration loaded",
             environment=self.app.environment,
             keycloak_enabled=self.keycloak.enabled,
         )

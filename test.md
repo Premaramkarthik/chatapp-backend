@@ -193,7 +193,7 @@ curl -X POST http://localhost:8000/v1/auth/signin/start \
   -H "Content-Type: application/json" \
   -d '{
     "identity_provider": "google",
-    "post_signin_redirect_uri": "http://localhost:5173/home/auth/callback"
+    "post_signin_redirect_uri": "http://localhost:8080/auth/callback"
   }'
 ```
 
@@ -222,7 +222,7 @@ curl -X POST http://localhost:8000/v1/auth/signup/social/start \
     "identity_provider": "google",
     "account_mode": "messenger",
     "device_fingerprint": "device-12345678",
-    "post_signin_redirect_uri": "http://localhost:5173/home/auth/callback"
+    "post_signin_redirect_uri": "http://localhost:8080/auth/callback"
   }'
 ```
 
@@ -244,6 +244,12 @@ curl http://localhost:8000/v1/auth/session -b cookies.txt
 curl -X POST http://localhost:8000/v1/auth/logout \
   -b cookies.txt \
   -H "X-CSRF-Token: <csrf>"
+```
+
+```bash
+curl -X POST http://localhost:8000/v1/auth/logout \
+  -H "Cookie: pp_session=OoDRrMbgtyDkzBkEvCF1Q3mk643NY1xjHQv342yaeMs; pp_csrf=xT9Nl68o4r75kK6J_hosocjhZBDCevJcokaOZIxgsrI" \
+  -H "X-CSRF-Token: xT9Nl68o4r75kK6J_hosocjhZBDCevJcokaOZIxgsrI"
 ```
 
 Returns Keycloak logout URL; cookies cleared.

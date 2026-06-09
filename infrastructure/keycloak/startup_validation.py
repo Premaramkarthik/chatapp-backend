@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 
 from core.config.settings import settings
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_info, log_warning
 from infrastructure.keycloak.admin_client import keycloak_admin_client
 from v1.utils.base import ConfigurationError
 
@@ -69,20 +69,23 @@ async def validate_keycloak_startup() -> None:
                     headers={"Authorization": f"Bearer {token}"},
                 )
                 if response.status_code == 404:
-                    logger.warning(
-                        "keycloak_idp_missing alias={} configure in Admin Console if needed",
-                        idp_alias,
+                    log_warning(
+                        logger,
+                        "Keycloak IdP missing; configure in Admin Console if needed",
+                        alias=idp_alias,
                     )
         except Exception as exc:
-            logger.warning(
-                "keycloak_idp_check_failed alias={} error_type={}",
-                idp_alias,
-                type(exc).__name__,
+            log_warning(
+                logger,
+                "Keycloak identity provider check failed",
+                alias=idp_alias,
+                error_type=type(exc).__name__,
             )
 
-    logger.info(
-        "keycloak_startup_validation_ok realm={} web_client={} api_client={}",
-        settings.keycloak.realm,
-        settings.keycloak.web_client_id,
-        settings.keycloak.audience,
+    log_info(
+        logger,
+        "Keycloak startup validation succeeded",
+        realm=settings.keycloak.realm,
+        web_client=settings.keycloak.web_client_id,
+        api_client=settings.keycloak.audience,
     )

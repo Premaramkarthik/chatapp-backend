@@ -7,7 +7,7 @@ import time
 from collections.abc import Awaitable, Callable
 from typing import Any, TypeVar
 
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_debug, log_warning
 from core.observability.prometheus_metrics import (
     DATABASE_CONNECTIONS_ACTIVE,
     DATABASE_CONNECTIONS_IDLE,
@@ -46,26 +46,28 @@ async def instrument_db_call[T](
         "db.query",
         attributes={"db.system": "postgresql", "db.operation": operation},
     ):
-        logger.debug("db_query_started operation={}", operation)
+        log_debug(logger, "Database query started", operation=operation)
         try:
             result = await func(*args, **kwargs)
         except Exception as exc:
             duration = time.perf_counter() - start
             DATABASE_QUERY_DURATION_SECONDS.labels(operation=operation).observe(duration)
             DATABASE_QUERY_FAILURES_TOTAL.labels(operation=operation).inc()
-            logger.warning(
-                "db_query_failed operation={} duration_ms={:.3f} error_type={}",
-                operation,
-                duration * 1000,
-                type(exc).__name__,
+            log_warning(
+                logger,
+                "Database query failed",
+                operation=operation,
+                duration_ms=f"{duration * 1000:.3f}",
+                error_type=type(exc).__name__,
             )
             raise
         duration = time.perf_counter() - start
         DATABASE_QUERY_DURATION_SECONDS.labels(operation=operation).observe(duration)
-        logger.debug(
-            "db_query_completed operation={} duration_ms={:.3f}",
-            operation,
-            duration * 1000,
+        log_debug(
+            logger,
+            "Database query completed",
+            operation=operation,
+            duration_ms=f"{duration * 1000:.3f}",
         )
         return result
 

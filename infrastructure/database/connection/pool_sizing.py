@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import asyncpg
 
 from core.config.settings import settings
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_info, log_warning
 
 logger = get_logger(__name__)
 
@@ -187,11 +187,10 @@ async def resolve_api_db_pool_min_max(
 
     if settings.database.target_label == "pgbouncer" and t.auto_infer:
         max_size = max(min_size, _PGBOUNCER_SESSION_SAFE_MAX_POOL)
-        logger.warning(
-            "DB_TARGET=pgbouncer with DB_POOL_AUTO=true; "
-            "skipping Postgres-based inference and defaulting to max_size={} "
-            "(set DB_POOL_MAX explicitly to override).",
-            max_size,
+        log_warning(
+            logger,
+            "Using safe default pool size for PgBouncer session mode; set DB_POOL_MAX to override",
+            max_size=max_size,
         )
         return min_size, max_size
 
@@ -208,13 +207,18 @@ async def resolve_api_db_pool_min_max(
             tuning=t,
         )
         max_size = max(min_size, inferred_max)
-        logger.info(
-            f"Inferred API DB pool max_size={max_size} "
-            f"(auto concurrent request estimate={t.auto_concurrent_requests})"
+        log_info(
+            logger,
+            "Inferred API database pool max size from PostgreSQL settings",
+            max_size=max_size,
+            auto_concurrent_requests=t.auto_concurrent_requests,
         )
         return min_size, max_size
     except Exception as e:
-        logger.warning(
-            f"Could not infer DB pool size from server ({e}); using max_size={_FALLBACK_MAX_POOL}"
+        log_warning(
+            logger,
+            "Could not infer database pool size from server; using fallback max size",
+            error=str(e),
+            max_size=_FALLBACK_MAX_POOL,
         )
         return min_size, max(min_size, _FALLBACK_MAX_POOL)

@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_info, log_warning
 from domains.chat.provision import maybe_auto_provision_on_accept
 from infrastructure.database.repositories.matching import PostgresMatchingRepository
 from infrastructure.database.repositories.users import PostgresUserRepository
@@ -48,11 +48,12 @@ async def create_connection_request(
     """Send a connection request to another user."""
     request_id = request_id_from(request)
     requester_id = await _local_user_id(principal)
-    logger.info(
-        "connection_request_received request_id={} requester_id={} recipient_id={}",
-        request_id,
-        requester_id,
-        payload.recipient_id,
+    log_info(
+        logger,
+        "Connection request received",
+        request_id=request_id,
+        requester_id=requester_id,
+        recipient_id=str(payload.recipient_id),
     )
     if str(payload.recipient_id) == requester_id:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Cannot request self")
@@ -66,25 +67,24 @@ async def create_connection_request(
         )
     except ValueError as exc:
         if str(exc) == "blocked":
-            logger.warning(
-                "connection_request_failed request_id={} requester_id={} reason=blocked",
-                request_id,
-                requester_id,
+            log_warning(
+                logger,
+                "Connection request failed because users are blocked",
+                request_id=request_id,
+                requester_id=requester_id,
             )
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail="User blocked",
             ) from exc
         raise
-    logger.info(
-        (
-            "connection_request_created request_id={} request_id_row={} "
-            "requester_id={} recipient_id={}"
-        ),
-        request_id,
-        row.get("id"),
-        requester_id,
-        payload.recipient_id,
+    log_info(
+        logger,
+        "Connection request created",
+        request_id=request_id,
+        request_id_row=row.get("id"),
+        requester_id=requester_id,
+        recipient_id=str(payload.recipient_id),
     )
     return ConnectionRequestResponse(**row)
 
@@ -110,22 +110,24 @@ async def accept_connection_request(
     """Accept a connection request (mutual accept creates user_connections)."""
     correlation_id = request_id_from(request)
     recipient_id = await _local_user_id(principal)
-    logger.info(
-        "connection_accept_received request_id={} connection_request_id={} recipient_id={}",
-        correlation_id,
-        request_id,
-        recipient_id,
+    log_info(
+        logger,
+        "Connection accept request received",
+        request_id=correlation_id,
+        connection_request_id=str(request_id),
+        recipient_id=recipient_id,
     )
     repo = PostgresMatchingRepository()
     try:
         row = await repo.accept_request(str(request_id), recipient_id)
     except ValueError as exc:
         code = str(exc)
-        logger.warning(
-            "connection_accept_failed request_id={} connection_request_id={} reason={}",
-            correlation_id,
-            request_id,
-            code,
+        log_warning(
+            logger,
+            "Connection accept failed",
+            request_id=correlation_id,
+            connection_request_id=str(request_id),
+            reason=code,
         )
         if code == "not_found":
             raise HTTPException(
@@ -142,11 +144,12 @@ async def accept_connection_request(
             detail="Invalid request state",
         ) from exc
     await maybe_auto_provision_on_accept(row, accepted_by_user_id=recipient_id)
-    logger.info(
-        "connection_accepted request_id={} connection_id={} recipient_id={}",
-        correlation_id,
-        row.get("id"),
-        recipient_id,
+    log_info(
+        logger,
+        "Connection request accepted",
+        request_id=correlation_id,
+        connection_id=row.get("id"),
+        recipient_id=recipient_id,
     )
     return UserConnectionResponse(**row)
 
@@ -161,29 +164,32 @@ async def reject_connection_request(
     """Reject a pending connection request."""
     correlation_id = request_id_from(request)
     recipient_id = await _local_user_id(principal)
-    logger.info(
-        "connection_reject_received request_id={} connection_request_id={} recipient_id={}",
-        correlation_id,
-        request_id,
-        recipient_id,
+    log_info(
+        logger,
+        "Connection reject request received",
+        request_id=correlation_id,
+        connection_request_id=str(request_id),
+        recipient_id=recipient_id,
     )
     repo = PostgresMatchingRepository()
     try:
         row = await repo.reject_request(str(request_id), recipient_id)
     except ValueError as exc:
-        logger.warning(
-            "connection_reject_failed request_id={} connection_request_id={} reason=not_found",
-            correlation_id,
-            request_id,
+        log_warning(
+            logger,
+            "Connection reject failed because request was not found",
+            request_id=correlation_id,
+            connection_request_id=str(request_id),
         )
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Request not found",
         ) from exc
-    logger.info(
-        "connection_rejected request_id={} connection_request_id={} recipient_id={}",
-        correlation_id,
-        request_id,
-        recipient_id,
+    log_info(
+        logger,
+        "Connection request rejected",
+        request_id=correlation_id,
+        connection_request_id=str(request_id),
+        recipient_id=recipient_id,
     )
     return ConnectionRequestResponse(**row)

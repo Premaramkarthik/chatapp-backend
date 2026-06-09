@@ -3,16 +3,16 @@
 from __future__ import annotations
 
 import json
-import logging
 from dataclasses import dataclass
 from typing import Any
 
 import grpc
 
 from core.config.settings import settings
+from core.logging.logger import get_logger, log_debug
 from infrastructure.tinode.p2p_topic import P2pTopicNames, compute_p2p_topic_names
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,7 @@ async def check_grpc_reachable() -> bool:
         await channel.close()
         return True
     except Exception as exc:
-        logger.debug("tinode grpc unreachable: %s", exc)
+        log_debug(logger, "Tinode gRPC endpoint is unreachable", error=str(exc))
         return False
 
 

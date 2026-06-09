@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from core.config.settings import settings
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_warning
 from core.observability.prometheus_metrics import (
     BACKGROUND_JOB_FAILURES_TOTAL,
     BACKGROUND_JOB_RUNS_TOTAL,
@@ -44,7 +44,12 @@ async def process_search_outbox_once(*, batch_size: int = 50) -> int:
                     await asyncio.to_thread(upsert_traveler, client, index_uid, snapshot)
             await repo.complete_outbox(event_id)
         except Exception as exc:
-            logger.warning("search outbox event {} failed: {}", event_id, exc)
+            log_warning(
+                logger,
+                "Search outbox event processing failed",
+                event_id=event_id,
+                error=str(exc),
+            )
             await repo.fail_outbox(event_id, str(exc))
 
     return len(events)
@@ -68,5 +73,9 @@ async def run_search_outbox_loop(stop_event: asyncio.Event, *, interval_sec: flo
                 raise
             except Exception as exc:
                 BACKGROUND_JOB_FAILURES_TOTAL.labels(job="search_outbox").inc()
-                logger.warning("search outbox loop error: {}", exc)
+                log_warning(
+                    logger,
+                    "Search outbox worker loop encountered an error",
+                    error=str(exc),
+                )
                 await asyncio.sleep(interval_sec)

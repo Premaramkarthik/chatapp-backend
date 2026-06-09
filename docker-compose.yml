@@ -113,6 +113,8 @@ services:
         condition: service_healthy
     ports:
       - "${KEYCLOAK_HOST_PORT:-8180}:8080"
+    volumes:
+      - ./docker/keycloak/themes:/opt/keycloak/themes:ro
 
 
   redis:

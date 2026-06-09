@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 
 from core.config.settings import settings
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_info, log_warning
 from core.observability.instrumentation import observe_service
 from core.observability.prometheus_metrics import (
     BACKGROUND_JOB_FAILURES_TOTAL,
@@ -61,12 +61,12 @@ async def reconcile_pending_verifications_once(*, batch_size: int | None = None)
                 user_id=keycloak_sub,
             )
         except Exception as exc:
-            logger.warning(
-                "verification_reconcile_keycloak_lookup_failed user_id={} keycloak_sub={} "
-                "error_type={}",
-                user_id,
-                keycloak_sub,
-                type(exc).__name__,
+            log_warning(
+                logger,
+                "Email verification reconcile could not look up user in Keycloak",
+                user_id=user_id,
+                keycloak_sub=keycloak_sub,
+                error_type=type(exc).__name__,
             )
             continue
 
@@ -79,10 +79,11 @@ async def reconcile_pending_verifications_once(*, batch_size: int | None = None)
             email_verified=True,
         )
         if activated is None:
-            logger.warning(
-                "verification_reconcile_activation_failed user_id={} keycloak_sub={}",
-                user_id,
-                keycloak_sub,
+            log_warning(
+                logger,
+                "Email verification reconcile could not activate user locally",
+                user_id=user_id,
+                keycloak_sub=keycloak_sub,
             )
             continue
 
@@ -94,11 +95,12 @@ async def reconcile_pending_verifications_once(*, batch_size: int | None = None)
         )
         VERIFICATION_SUCCESS_TOTAL.labels(source="reconcile").inc()
         activated_count += 1
-        logger.info(
-            "verification_reconcile_activation_succeeded user_id={} keycloak_sub={} status={}",
-            activated.id,
-            keycloak_sub,
-            activated.status,
+        log_info(
+            logger,
+            "Email verification reconcile activated user after Keycloak verification",
+            user_id=activated.id,
+            keycloak_sub=keycloak_sub,
+            status=activated.status,
         )
 
     return activated_count
@@ -120,15 +122,17 @@ async def run_verification_reconcile_loop(
                 BACKGROUND_JOB_RUNS_TOTAL.labels(job="verification_reconcile").inc()
                 activated = await reconcile_pending_verifications_once(batch_size=None)
                 if activated:
-                    logger.info(
-                        "verification_reconcile_batch_complete activated_count={}",
-                        activated,
+                    log_info(
+                        logger,
+                        "Email verification reconcile batch completed",
+                        activated_count=activated,
                     )
             except Exception as exc:
                 BACKGROUND_JOB_FAILURES_TOTAL.labels(job="verification_reconcile").inc()
-                logger.warning(
-                    "verification_reconcile_loop_error error_type={}",
-                    type(exc).__name__,
+                log_warning(
+                    logger,
+                    "Email verification reconcile background loop failed",
+                    error_type=type(exc).__name__,
                 )
         try:
             await asyncio.wait_for(stop_event.wait(), timeout=delay)

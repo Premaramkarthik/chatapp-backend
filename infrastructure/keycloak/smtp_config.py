@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 
 from core.config.settings import settings
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_info, log_warning
 from infrastructure.keycloak.master_admin import get_master_admin_token
 
 logger = get_logger(__name__)
@@ -25,9 +25,10 @@ def build_smtp_server_payload() -> dict[str, str] | None:
     if not keycloak.smtp_password_value:
         missing.append("KEYCLOAK_SMTP_PASSWORD")
     if missing:
-        logger.warning(
-            "keycloak_smtp_skip reason=incomplete_config missing={}",
-            ",".join(missing),
+        log_warning(
+            logger,
+            "Skipping Keycloak SMTP setup because configuration is incomplete",
+            missing=",".join(missing),
         )
         return None
 
@@ -115,8 +116,9 @@ async def ensure_keycloak_smtp() -> None:
                 smtp_server=smtp_server,
             )
 
-    logger.info(
-        "keycloak_smtp_configured realm={} host={}",
-        keycloak.realm,
-        smtp_server["host"],
+    log_info(
+        logger,
+        "Keycloak SMTP settings applied to realm",
+        realm=keycloak.realm,
+        host=smtp_server["host"],
     )

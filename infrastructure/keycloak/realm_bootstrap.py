@@ -7,7 +7,7 @@ import json
 import httpx
 
 from core.config.settings import REPO_ROOT, settings
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_info
 from infrastructure.keycloak.master_admin import get_master_admin_token, wait_for_keycloak
 from v1.utils.base import ConfigurationError
 
@@ -53,9 +53,10 @@ async def ensure_keycloak_realm() -> None:
     async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
         discovery = await client.get(settings.keycloak.well_known_url)
         if discovery.status_code == 200:
-            logger.info(
-                "keycloak_realm_bootstrap_skip realm={} reason=already_exists",
-                settings.keycloak.realm,
+            log_info(
+                logger,
+                "Skipping Keycloak realm bootstrap because realm already exists",
+                realm=settings.keycloak.realm,
             )
             return
         if discovery.status_code != 404:
@@ -85,9 +86,11 @@ async def ensure_keycloak_realm() -> None:
     async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
         response = await client.post(create_url, headers=headers, json=realm_payload)
         if response.status_code == 409:
-            logger.info(
-                "keycloak_realm_bootstrap_skip realm={} reason=conflict",
-                settings.keycloak.realm,
+            log_info(
+                logger,
+                "Skipping Keycloak realm bootstrap because realm already exists",
+                realm=settings.keycloak.realm,
+                reason="conflict",
             )
             return
         if response.status_code >= 400:
@@ -100,8 +103,9 @@ async def ensure_keycloak_realm() -> None:
                 },
             )
 
-    logger.info(
-        "keycloak_realm_bootstrap_ok realm={} template={}",
-        settings.keycloak.realm,
-        REALM_TEMPLATE_PATH.name,
+    log_info(
+        logger,
+        "Keycloak realm bootstrap completed",
+        realm=settings.keycloak.realm,
+        template=REALM_TEMPLATE_PATH.name,
     )

@@ -27,6 +27,7 @@ class SigninPasswordRequest(BaseModel):
 
     email: EmailStr
     password: SecretStr = Field(min_length=1, max_length=128)
+    remember_me: bool = False
 
 
 class SigninPasswordResponse(BaseModel):
@@ -60,6 +61,13 @@ class ForgotPasswordRequest(BaseModel):
     """Public forgot-password request."""
 
     email: EmailStr
+
+
+class ResetPasswordCompleteRequest(BaseModel):
+    """Request to complete app-owned password reset."""
+
+    token: str = Field(min_length=16, max_length=512)
+    password: SecretStr = Field(min_length=12, max_length=128)
 
 
 class SignupStartRequest(BaseModel):
@@ -114,6 +122,19 @@ class SignupResendRequest(BaseModel):
     email: EmailStr
 
 
+class EmailVerificationCompleteRequest(BaseModel):
+    """Request to complete app-owned email verification."""
+
+    token: str = Field(min_length=16, max_length=512)
+
+
+class EmailVerificationCompleteResponse(BaseModel):
+    """Response returned after email verification succeeds."""
+
+    status: str = "ok"
+    next_step: str = "signin"
+
+
 class SocialSignupStartRequest(BaseModel):
     """Begin social signup with captured app account mode."""
 
@@ -135,6 +156,7 @@ class SignupAcceptedResponse(BaseModel):
 
     status: str = "accepted"
     next_step: str = "check_email"
+    cooldown_sec: int | None = None
 
 
 class SignupStartResponse(BaseModel):
@@ -167,6 +189,7 @@ class SessionResponse(BaseModel):
     device_label: str | None = None
     last_seen_at: datetime
     created_at: datetime
+    is_current: bool = False
 
 
 class RevokeAllSessionsRequest(BaseModel):

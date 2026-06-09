@@ -4,7 +4,7 @@ import time
 from typing import TYPE_CHECKING, Any
 
 from core.config.settings import settings
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_debug, log_warning
 from core.observability.prometheus_metrics import DATABASE_POOL_ACQUIRE_WAIT_SECONDS
 
 if TYPE_CHECKING:
@@ -25,31 +25,34 @@ def db_target_label() -> str:
 
 def log_pool_acquire_wait(service: str, wait_sec: float) -> None:
     """Emit structured acquire-wait line; warning when wait exceeds ``ACQUIRE_WARN_SEC``."""
-    msg = f"db_pool_acquire service={service} db_target={db_target_label()} wait_sec={wait_sec:.6f}"
+    context = {
+        "service": service,
+        "db_target": db_target_label(),
+        "wait_sec": f"{wait_sec:.6f}",
+    }
     if wait_sec >= settings.database.pool_acquire_warn_sec:
-        logger.warning(msg)
+        log_warning(logger, "Database pool acquire wait exceeded threshold", **context)
     else:
-        logger.debug(msg)
+        log_debug(logger, "Database pool connection acquired", **context)
 
 
 def log_pool_close(
     service: str, close_sec: float, *, ok: bool, error_type: str | None = None
 ) -> None:
     """Emit structured close timing; warning when close is slow or fails."""
-    msg = (
-        "db_pool_close "
-        f"service={service} "
-        f"db_target={db_target_label()} "
-        f"ok={str(ok).lower()} "
-        f"close_sec={close_sec:.6f}"
-    )
+    context: dict[str, str | bool] = {
+        "service": service,
+        "db_target": db_target_label(),
+        "ok": ok,
+        "close_sec": f"{close_sec:.6f}",
+    }
     if error_type:
-        msg += f" error_type={error_type}"
+        context["error_type"] = error_type
 
     if (not ok) or close_sec >= settings.database.pool_close_warn_sec:
-        logger.warning(msg)
+        log_warning(logger, "Database pool close completed slowly or with failure", **context)
     else:
-        logger.debug(msg)
+        log_debug(logger, "Database pool closed", **context)
 
 
 async def close_pool_with_instrumentation(pool: asyncpg.Pool, service: str = POOL_SERVICE) -> None:

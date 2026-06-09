@@ -10,12 +10,20 @@ from asyncpg import Record
 from domains.auth.models import (
     AuthSession,
     AuthSessionStatus,
+    EmailVerificationToken,
+    PasswordResetToken,
     SessionView,
     SigninState,
     SignupSession,
 )
 from domains.auth.security import now_utc
-from infrastructure.database.connection import call_json_function, execute, fetch, fetchrow
+from infrastructure.database.connection import (
+    call_json_function,
+    execute,
+    fetch,
+    fetchrow,
+    get_pool,
+)
 
 
 class PostgresAuthRepository:
@@ -430,6 +438,140 @@ class PostgresAuthRepository:
         row = await call_json_function("fn_signup_sessions", 3, {"session_id": session_id})
         return None if row is None else _signup_session_from_mapping(row)
 
+    async def create_email_verification_token(
+        self,
+        *,
+        user_id: str,
+        token_hash: str,
+        expires_at: datetime,
+    ) -> EmailVerificationToken:
+        """Persist a single-use app verification token hash."""
+        pool = await get_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                """
+                UPDATE email_verification_tokens
+                SET consumed_at = now()
+                WHERE user_id = $1::uuid
+                  AND consumed_at IS NULL
+                """,
+                user_id,
+            )
+            row = await conn.fetchrow(
+                """
+                INSERT INTO email_verification_tokens (user_id, token_hash, expires_at)
+                VALUES ($1::uuid, $2, $3)
+                RETURNING *
+                """,
+                user_id,
+                token_hash,
+                expires_at,
+            )
+        return _email_verification_token_from_record(row)
+
+    async def consume_email_verification_token(
+        self,
+        *,
+        token_hash: str,
+    ) -> EmailVerificationToken | None:
+        """Consume an unexpired verification token exactly once."""
+        row = await fetchrow(
+            """
+            UPDATE email_verification_tokens
+            SET consumed_at = now()
+            WHERE token_hash = $1
+              AND consumed_at IS NULL
+              AND expires_at > now()
+            RETURNING *
+            """,
+            token_hash,
+        )
+        return None if row is None else _email_verification_token_from_record(row)
+
+    async def get_email_verification_token(
+        self,
+        *,
+        token_hash: str,
+    ) -> EmailVerificationToken | None:
+        """Return a verification token row without consuming it."""
+        row = await fetchrow(
+            """
+            SELECT *
+            FROM email_verification_tokens
+            WHERE token_hash = $1
+            LIMIT 1
+            """,
+            token_hash,
+        )
+        return None if row is None else _email_verification_token_from_record(row)
+
+    async def create_password_reset_token(
+        self,
+        *,
+        user_id: str,
+        token_hash: str,
+        expires_at: datetime,
+    ) -> PasswordResetToken:
+        """Persist a single-use app password reset token hash."""
+        pool = await get_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute(
+                """
+                UPDATE password_reset_tokens
+                SET consumed_at = now()
+                WHERE user_id = $1::uuid
+                  AND consumed_at IS NULL
+                """,
+                user_id,
+            )
+            row = await conn.fetchrow(
+                """
+                INSERT INTO password_reset_tokens (user_id, token_hash, expires_at)
+                VALUES ($1::uuid, $2, $3)
+                RETURNING *
+                """,
+                user_id,
+                token_hash,
+                expires_at,
+            )
+        return _password_reset_token_from_record(row)
+
+    async def consume_password_reset_token(
+        self,
+        *,
+        token_hash: str,
+    ) -> PasswordResetToken | None:
+        """Consume an unexpired password reset token exactly once."""
+        row = await fetchrow(
+            """
+            UPDATE password_reset_tokens
+            SET consumed_at = now()
+            WHERE token_hash = $1
+              AND consumed_at IS NULL
+              AND expires_at > now()
+            RETURNING *
+            """,
+            token_hash,
+        )
+        return None if row is None else _password_reset_token_from_record(row)
+
+    async def get_password_reset_token(
+        self,
+        *,
+        token_hash: str,
+    ) -> PasswordResetToken | None:
+        """Return a password reset token row without consuming it."""
+        row = await fetchrow(
+            """
+            SELECT *
+            FROM password_reset_tokens
+            WHERE token_hash = $1
+            LIMIT 1
+            """,
+            token_hash,
+        )
+        return None if row is None else _password_reset_token_from_record(row)
+
 
 def _signup_session_from_mapping(data: dict) -> SignupSession:
     return SignupSession(
@@ -440,6 +582,32 @@ def _signup_session_from_mapping(data: dict) -> SignupSession:
         expires_at=data["expires_at"],
         revoked_at=data.get("revoked_at"),
         created_at=data.get("created_at"),
+    )
+
+
+def _email_verification_token_from_record(row: Record | None) -> EmailVerificationToken:
+    if row is None:
+        raise RuntimeError("Expected email verification token row")
+    return EmailVerificationToken(
+        id=str(row["id"]),
+        user_id=str(row["user_id"]),
+        token_hash=str(row["token_hash"]),
+        expires_at=row["expires_at"],
+        consumed_at=row["consumed_at"],
+        created_at=row["created_at"],
+    )
+
+
+def _password_reset_token_from_record(row: Record | None) -> PasswordResetToken:
+    if row is None:
+        raise RuntimeError("Expected password reset token row")
+    return PasswordResetToken(
+        id=str(row["id"]),
+        user_id=str(row["user_id"]),
+        token_hash=str(row["token_hash"]),
+        expires_at=row["expires_at"],
+        consumed_at=row["consumed_at"],
+        created_at=row["created_at"],
     )
 
 

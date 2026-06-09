@@ -7,7 +7,7 @@ from typing import Any, cast
 import asyncpg
 
 from core.config.settings import settings
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_error, log_exception, log_info, log_warning
 from core.observability.db_instrumentation import db_operation, update_pool_gauges
 from infrastructure.database.connection.pool_instrumentation import (
     close_pool_with_instrumentation,
@@ -100,7 +100,7 @@ class DatabasePool:
             return
 
         await close_pool_with_instrumentation(pool)
-        logger.info("Database connection pool closed for current context.")
+        log_info(logger, "Database connection pool closed for current context")
 
 
 # Module-level accessor for backward compatibility
@@ -129,16 +129,17 @@ async def connect_to_db_with_retry(max_retries: int = 5, delay: float = 2.0) -> 
     compete for Postgres ``max_connections``.
     """
     min_size, max_size = await _resolved_api_pool_min_max()
-    logger.info(
-        "db_pool_connect service=api db_target={} "
-        "db_host={} db_port={} db_name={} db_user={} pool_min={} pool_max={}",
-        db_target_label(),
-        settings.database.host,
-        settings.database.port,
-        settings.database.name,
-        settings.database.user,
-        min_size,
-        max_size,
+    log_info(
+        logger,
+        "Connecting to PostgreSQL for API database pool",
+        service="api",
+        db_target=db_target_label(),
+        db_host=settings.database.host,
+        db_port=settings.database.port,
+        db_name=settings.database.name,
+        db_user=settings.database.user,
+        pool_min=min_size,
+        pool_max=max_size,
     )
 
     retry_errors = (
@@ -162,35 +163,37 @@ async def connect_to_db_with_retry(max_retries: int = 5, delay: float = 2.0) -> 
                 init=_init_connection,
             )
             _db.set_pool(pool)
-            logger.info(
-                "db_pool_ready service=api db_target={} pool_min={} pool_max={} "
-                "db_host={} db_port={} db_name={} initial_pool_size={}",
-                db_target_label(),
-                min_size,
-                max_size,
-                settings.database.host,
-                settings.database.port,
-                settings.database.name,
-                pool.get_size(),
+            log_info(
+                logger,
+                "API database connection pool is ready",
+                service="api",
+                db_target=db_target_label(),
+                pool_min=min_size,
+                pool_max=max_size,
+                db_host=settings.database.host,
+                db_port=settings.database.port,
+                db_name=settings.database.name,
+                initial_pool_size=pool.get_size(),
             )
             return pool
         except asyncpg.exceptions.InvalidPasswordError as e:
             error_msg = f"Database authentication failed for user '{settings.database.user}'."
-            logger.error(error_msg)
+            log_error(logger, error_msg)
             raise DatabaseConnectionError(error_msg) from e
         except retry_errors as e:
-            logger.warning(
-                "db_pool_connect_retry service=api attempt={} max_retries={} "
-                "error_type={} detail={}",
-                attempt,
-                max_retries,
-                type(e).__name__,
-                e,
+            log_warning(
+                logger,
+                "Database pool connection attempt failed; retrying",
+                service="api",
+                attempt=attempt,
+                max_retries=max_retries,
+                error_type=type(e).__name__,
+                detail=str(e),
             )
             if attempt < max_retries:
                 await asyncio.sleep(delay * attempt)
             else:
-                logger.exception("Could not connect to PostgreSQL after retries.")
+                log_exception(logger, "Could not connect to PostgreSQL after retries")
                 raise DatabaseConnectionError(
                     "Could not connect to PostgreSQL after retries"
                 ) from e

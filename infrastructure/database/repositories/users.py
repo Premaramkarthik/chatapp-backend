@@ -28,6 +28,11 @@ class PostgresUserRepository(UserRepository):
         row = await call_json_function("fn_users", 3, {"keycloak_sub": keycloak_sub})
         return None if row is None else User.from_mapping(row)
 
+    async def get_by_id(self, user_id: str) -> User | None:
+        """Return a local user by id."""
+        row = await call_json_function("fn_users", 2, {"user_id": user_id})
+        return None if row is None else User.from_mapping(row)
+
     async def update_account_mode(self, *, keycloak_sub: str, account_mode: str) -> User:
         """Update business account mode without changing Keycloak roles."""
         row = await call_json_function(

@@ -46,7 +46,8 @@ async def test_provision_clears_required_actions_before_verify_email() -> None:
     keycloak.create_user = AsyncMock(return_value="kc-sub")
     keycloak.set_user_password = AsyncMock()
     keycloak.clear_required_actions = AsyncMock()
-    keycloak.send_verification_email = AsyncMock()
+    email_verification = AsyncMock()
+    email_verification.issue_and_send = AsyncMock()
 
     user_repository = AsyncMock()
     user_repository.link_keycloak_subject = AsyncMock(
@@ -62,6 +63,7 @@ async def test_provision_clears_required_actions_before_verify_email() -> None:
         user_repository=user_repository,
         auth_repository=auth_repository,
         keycloak=keycloak,
+        email_verification=email_verification,
     )
 
     await provisioner.provision(
@@ -72,6 +74,6 @@ async def test_provision_clears_required_actions_before_verify_email() -> None:
     )
 
     keycloak.clear_required_actions.assert_awaited_once_with(user_id="kc-sub")
-    keycloak.send_verification_email.assert_awaited_once_with(user_id="kc-sub")
+    email_verification.issue_and_send.assert_awaited_once()
     keycloak.create_user.assert_awaited_once()
     assert keycloak.create_user.await_args.kwargs["required_actions"] == []

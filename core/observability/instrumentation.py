@@ -8,7 +8,7 @@ from collections.abc import AsyncIterator, Callable
 from contextlib import asynccontextmanager
 from typing import Any, TypeVar
 
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_debug, log_warning
 from core.observability.prometheus_metrics import (
     KEYCLOAK_FAILURES_TOTAL,
     KEYCLOAK_REQUEST_DURATION_SECONDS,
@@ -34,10 +34,11 @@ def observe_service(service_name: str) -> Callable[[F], F]:
             tracer = trace.get_tracer(__name__)
             start = time.perf_counter()
             with tracer.start_as_current_span(f"{service_name}.{method_name}"):
-                logger.debug(
-                    "service_execution_started service={} method={}",
-                    service_name,
-                    method_name,
+                log_debug(
+                    logger,
+                    "Service method execution started",
+                    service=service_name,
+                    method=method_name,
                 )
                 try:
                     result = await func(*args, **kwargs)
@@ -47,13 +48,13 @@ def observe_service(service_name: str) -> Callable[[F], F]:
                         service=service_name,
                         method=method_name,
                     ).observe(duration)
-                    logger.warning(
-                        "service_execution_failed service={} method={} "
-                        "duration_ms={:.3f} error_type={}",
-                        service_name,
-                        method_name,
-                        duration * 1000,
-                        type(exc).__name__,
+                    log_warning(
+                        logger,
+                        "Service method execution failed",
+                        service=service_name,
+                        method=method_name,
+                        duration_ms=f"{duration * 1000:.3f}",
+                        error_type=type(exc).__name__,
                     )
                     raise
                 duration = time.perf_counter() - start
@@ -61,11 +62,12 @@ def observe_service(service_name: str) -> Callable[[F], F]:
                     service=service_name,
                     method=method_name,
                 ).observe(duration)
-                logger.debug(
-                    "service_execution_completed service={} method={} duration_ms={:.3f}",
-                    service_name,
-                    method_name,
-                    duration * 1000,
+                log_debug(
+                    logger,
+                    "Service method execution completed",
+                    service=service_name,
+                    method=method_name,
+                    duration_ms=f"{duration * 1000:.3f}",
                 )
                 return result
 
@@ -89,9 +91,10 @@ async def log_external_call(operation: str) -> AsyncIterator[None]:
         duration = time.perf_counter() - start
         KEYCLOAK_REQUEST_DURATION_SECONDS.labels(operation=operation).observe(duration)
         KEYCLOAK_REQUESTS_TOTAL.labels(operation=operation, status=status).inc()
-        logger.debug(
-            "external_call_completed operation={} status={} duration_ms={:.3f}",
-            operation,
-            status,
-            duration * 1000,
+        log_debug(
+            logger,
+            "External call completed",
+            operation=operation,
+            status=status,
+            duration_ms=f"{duration * 1000:.3f}",
         )

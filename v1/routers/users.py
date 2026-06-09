@@ -4,6 +4,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Request, status
 
+from core.logging.logger import get_logger, log_info
 from domains.auth import AuthService
 from domains.users.bootstrap import BootstrapUser
 from domains.users.user import BootstrapUserCommand
@@ -13,6 +14,8 @@ from v1.dependencies.container import get_auth_service, get_bootstrap_user_use_c
 from v1.schemas.principal import KeycloakPrincipal
 from v1.schemas.users import AccountModeUpdateRequest, UserResponse
 from v1.utils.request_context import request_id_from
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/v1/users", tags=["users"])
 CurrentPrincipal = Annotated[KeycloakPrincipal, Depends(get_current_principal)]
@@ -25,7 +28,6 @@ ProfileUpdater = Annotated[KeycloakPrincipal, Depends(require_capability("profil
 async def update_account_mode(
     request: Request,
     payload: AccountModeUpdateRequest,
-    _: ProfileUpdater,
     principal: CurrentPrincipal,
     bootstrap_user: BootstrapUserUseCase,
 ) -> dict:
@@ -41,6 +43,13 @@ async def update_account_mode(
     )
     user = await PostgresUserRepository().update_account_mode(
         keycloak_sub=principal.sub,
+        account_mode=payload.account_mode,
+    )
+    log_info(
+        logger,
+        "User account mode updated",
+        request_id=request_id_from(request),
+        user_id=user.id,
         account_mode=payload.account_mode,
     )
     return user.to_dict()

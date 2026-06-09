@@ -9,15 +9,7 @@ from typing import Any
 import httpx
 
 from core.config.settings import settings
-from core.logging.domain_events import (
-    KEYCLOAK_USER_CREATED,
-    KEYCLOAK_USER_DELETED,
-    KEYCLOAK_USER_UPDATED,
-    PASSWORD_RESET_TRIGGERED,
-    VERIFICATION_EMAIL_SENT,
-    log_domain_event,
-)
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_info, log_warning
 from core.observability.instrumentation import log_external_call
 from v1.utils.base import KeycloakIntegrationError
 
@@ -42,21 +34,27 @@ def _log_admin_response(
     error_type: str | None = None,
 ) -> None:
     """Emit structured logs for Keycloak Admin API calls."""
-    fields = (
-        "keycloak_admin_response method={} path={} status_code={} duration_ms={:.1f} "
-        "keycloak_sub={}"
-    )
-    values: list[object] = [
-        method,
-        _admin_log_path(url),
-        status_code,
-        duration_ms,
-        keycloak_user_id or "",
-    ]
     if error_type:
-        logger.warning(fields + " error_type={}", *values, error_type)
+        log_warning(
+            logger,
+            "Keycloak Admin API request failed",
+            method=method,
+            path=_admin_log_path(url),
+            status_code=status_code,
+            duration_ms=f"{duration_ms:.1f}",
+            keycloak_sub=keycloak_user_id or None,
+            error_type=error_type,
+        )
         return
-    logger.info(fields, *values)
+    log_info(
+        logger,
+        "Keycloak Admin API request completed",
+        method=method,
+        path=_admin_log_path(url),
+        status_code=status_code,
+        duration_ms=f"{duration_ms:.1f}",
+        keycloak_sub=keycloak_user_id or None,
+    )
 
 
 def _map_admin_error(exc: httpx.HTTPStatusError) -> KeycloakIntegrationError:
@@ -322,7 +320,6 @@ class KeycloakAdminClient:
             client_id=settings.keycloak.audience,
             role_names=settings.auth.default_signup_roles,
         )
-        log_domain_event(KEYCLOAK_USER_CREATED, keycloak_sub=user_id)
         return user_id
 
     async def delete_user(self, user_id: str) -> None:
@@ -336,7 +333,6 @@ class KeycloakAdminClient:
             token=token,
             keycloak_user_id=user_id,
         )
-        log_domain_event(KEYCLOAK_USER_DELETED, keycloak_sub=user_id)
 
     async def update_user(self, *, user_id: str, fields: dict[str, Any]) -> None:
         """Update Keycloak user fields."""
@@ -350,11 +346,26 @@ class KeycloakAdminClient:
             keycloak_user_id=user_id,
             json=fields,
         )
-        log_domain_event(KEYCLOAK_USER_UPDATED, keycloak_sub=user_id)
 
     async def update_user_profile(self, *, user_id: str, display_name: str) -> None:
         """Update Keycloak profile display name."""
         await self.update_user(user_id=user_id, fields={"firstName": display_name})
+
+    async def mark_email_verified(self, *, user_id: str) -> None:
+        """Mark a user's email as verified in Keycloak."""
+        await self.update_user(user_id=user_id, fields={"emailVerified": True})
+
+    async def logout_user_sessions(self, *, user_id: str) -> None:
+        """Revoke all SSO sessions for a Keycloak user."""
+        token = await self.get_admin_token()
+        url = f"{settings.keycloak.admin_realm_url}/users/{user_id}/logout"
+        await self._request(
+            "POST",
+            url,
+            operation="logout_user_sessions",
+            token=token,
+            keycloak_user_id=user_id,
+        )
 
     async def clear_required_actions(self, *, user_id: str) -> None:
         """Remove pending Keycloak required actions on a user."""
@@ -432,7 +443,6 @@ class KeycloakAdminClient:
             keycloak_user_id=user_id,
             params=params,
         )
-        log_domain_event(VERIFICATION_EMAIL_SENT, keycloak_sub=user_id)
 
     async def send_verification_email(self, *, user_id: str) -> None:
         """Alias for send_verify_email."""
@@ -444,7 +454,6 @@ class KeycloakAdminClient:
         if user_id is None:
             return False
         await self.execute_actions_email(user_id=user_id, actions=["UPDATE_PASSWORD"])
-        log_domain_event(PASSWORD_RESET_TRIGGERED, keycloak_sub=user_id)
         return True
 
     async def send_account_setup_email(self, *, user_id: str) -> None:

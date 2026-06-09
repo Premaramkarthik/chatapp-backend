@@ -27,6 +27,7 @@ class AuthSecurityEventType(StrEnum):
     LOGOUT_SUCCEEDED = "logout_succeeded"
     FORGOT_PASSWORD_REQUESTED = "forgot_password_requested"
     FORGOT_PASSWORD_EMAIL_SENT = "forgot_password_email_sent"
+    PASSWORD_RESET_COMPLETED = "password_reset_completed"
     SESSION_REVOKED = "session_revoked"
     SUSPICIOUS_ACTIVITY = "suspicious_activity"
     REFRESH_FAILED = "refresh_failed"
@@ -106,6 +107,30 @@ class SignupSession:
     step_completed: int
     expires_at: datetime
     revoked_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class EmailVerificationToken:
+    """One-time app-owned email verification token row."""
+
+    id: str
+    user_id: str
+    token_hash: str
+    expires_at: datetime
+    consumed_at: datetime | None = None
+    created_at: datetime | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class PasswordResetToken:
+    """One-time app-owned password reset token row."""
+
+    id: str
+    user_id: str
+    token_hash: str
+    expires_at: datetime
+    consumed_at: datetime | None = None
     created_at: datetime | None = None
 
 

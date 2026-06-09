@@ -56,11 +56,7 @@ def setup_logger(
         serialize=False,
     )
 
-    logger.info(
-        "logger_initialized log_file={} level={}",
-        log_file,
-        level,
-    )
+    log_info(logger, "Logger initialized", log_file=log_file, level=level)
 
 
 def get_logger(name: str) -> Any:
@@ -73,3 +69,36 @@ def get_logger(name: str) -> Any:
         A loguru logger bound with module metadata.
     """
     return logger.bind(module=name, logger_name=name)
+
+
+def format_log_message(message: str, **context: Any) -> str:
+    """Build a human-readable log line with optional parenthetical context."""
+    if not context:
+        return message
+    suffix = ", ".join(f"{key}={value}" for key, value in context.items() if value is not None)
+    return f"{message} ({suffix})" if suffix else message
+
+
+def log_info(logger_instance: Any, message: str, **context: Any) -> None:
+    """Log an info message with optional context in parentheses."""
+    logger_instance.info(format_log_message(message, **context))
+
+
+def log_warning(logger_instance: Any, message: str, **context: Any) -> None:
+    """Log a warning message with optional context in parentheses."""
+    logger_instance.warning(format_log_message(message, **context))
+
+
+def log_error(logger_instance: Any, message: str, **context: Any) -> None:
+    """Log an error message with optional context in parentheses."""
+    logger_instance.error(format_log_message(message, **context))
+
+
+def log_debug(logger_instance: Any, message: str, **context: Any) -> None:
+    """Log a debug message with optional context in parentheses."""
+    logger_instance.debug(format_log_message(message, **context))
+
+
+def log_exception(logger_instance: Any, message: str, **context: Any) -> None:
+    """Log an exception with optional context in parentheses."""
+    logger_instance.exception(format_log_message(message, **context))

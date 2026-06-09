@@ -8,7 +8,7 @@ from urllib.parse import urlparse, urlunparse
 import httpx
 
 from core.config.settings import settings
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_info, log_warning
 from infrastructure.keycloak.master_admin import get_master_admin_token
 from infrastructure.keycloak.smtp_config import _client_credentials_token
 
@@ -32,9 +32,10 @@ def build_google_idp_payload() -> dict[str, Any] | None:
     if not keycloak.google_client_secret_value:
         missing.append("KEYCLOAK_GOOGLE_CLIENT_SECRET")
     if missing:
-        logger.warning(
-            "keycloak_google_idp_skip reason=incomplete_config missing={}",
-            ",".join(missing),
+        log_warning(
+            logger,
+            "Skipping Google identity provider setup because configuration is incomplete",
+            missing=",".join(missing),
         )
         return None
 
@@ -134,9 +135,10 @@ async def _ensure_web_client_redirect_uris(client: httpx.AsyncClient) -> None:
         item for item in list_response.json() if item.get("clientId") == keycloak.web_client_id
     ]
     if not matches:
-        logger.warning(
-            "keycloak_web_client_redirect_skip reason=client_not_found client_id={}",
-            keycloak.web_client_id,
+        log_warning(
+            logger,
+            "Skipping web client redirect URI update because client was not found",
+            client_id=keycloak.web_client_id,
         )
         return
 
@@ -170,11 +172,12 @@ async def _ensure_web_client_redirect_uris(client: httpx.AsyncClient) -> None:
         json=client_payload,
     )
     update_response.raise_for_status()
-    logger.info(
-        "keycloak_web_client_redirects_updated client_id={} redirect_count={} origin_count={}",
-        keycloak.web_client_id,
-        len(merged_redirects),
-        len(merged_origins),
+    log_info(
+        logger,
+        "Updated Keycloak web client redirect URIs and web origins",
+        client_id=keycloak.web_client_id,
+        redirect_count=len(merged_redirects),
+        origin_count=len(merged_origins),
     )
 
 
@@ -203,10 +206,11 @@ async def _sync_broker_flow_requirements(client: httpx.AsyncClient) -> None:
     for provider, requirement in _BROKER_FLOW_EXECUTIONS:
         execution = providers.get(provider)
         if execution is None:
-            logger.warning(
-                "keycloak_broker_flow_execution_missing flow={} provider={}",
-                GOOGLE_BROKER_FLOW_ALIAS,
-                provider,
+            log_warning(
+                logger,
+                "Broker flow execution is missing from Keycloak",
+                flow=GOOGLE_BROKER_FLOW_ALIAS,
+                provider=provider,
             )
             continue
         if execution.get("requirement") == requirement:
@@ -259,10 +263,11 @@ async def _ensure_google_broker_auto_link_flow(client: httpx.AsyncClient) -> Non
     created = not await _flow_alias_exists(client, flow_alias=GOOGLE_BROKER_FLOW_ALIAS)
     if created:
         await _create_broker_auto_link_flow(client)
-        logger.info(
-            "keycloak_google_broker_flow_configured realm={} flow={}",
-            settings.keycloak.realm,
-            GOOGLE_BROKER_FLOW_ALIAS,
+        log_info(
+            logger,
+            "Configured Google broker auto-link flow in Keycloak",
+            realm=settings.keycloak.realm,
+            flow=GOOGLE_BROKER_FLOW_ALIAS,
         )
         return
     await _sync_broker_flow_requirements(client)
@@ -316,8 +321,9 @@ async def ensure_keycloak_google_idp() -> None:
         await _ensure_google_broker_auto_link_flow(client)
         await _upsert_google_idp(client, idp_payload=idp_payload)
 
-    logger.info(
-        "keycloak_google_idp_configured realm={} alias={}",
-        settings.keycloak.realm,
-        settings.keycloak.google_idp_alias,
+    log_info(
+        logger,
+        "Google identity provider configured in Keycloak",
+        realm=settings.keycloak.realm,
+        alias=settings.keycloak.google_idp_alias,
     )

@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_info, log_warning
 from core.observability.prometheus_metrics import TINODE_PROVISION_TOTAL
 from domains.chat.provision import ProvisionError, provision_conversation_for_connection
 from domains.chat.session import TinodeSessionNotReadyError, build_tinode_session
@@ -72,25 +72,32 @@ async def tinode_session(
     """Return base64 login secret and Tinode web URL for the authenticated user."""
     request_id = request_id_from(request)
     user = await _local_user(principal)
-    logger.info("tinode_session_requested request_id={} user_id={}", request_id, user["id"])
+    log_info(
+        logger,
+        "Tinode session requested",
+        request_id=request_id,
+        user_id=user["id"],
+    )
     try:
         payload = await build_tinode_session(user=user)
     except TinodeSessionNotReadyError as exc:
-        logger.warning(
-            "tinode_session_failed request_id={} user_id={} reason={}",
-            request_id,
-            user["id"],
-            exc,
+        log_warning(
+            logger,
+            "Tinode session request failed",
+            request_id=request_id,
+            user_id=user["id"],
+            reason=str(exc),
         )
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
             detail=str(exc),
         ) from exc
-    logger.info(
-        "tinode_session_committed request_id={} user_id={} tinode_user_id={}",
-        request_id,
-        user["id"],
-        payload.get("tinode_user_id"),
+    log_info(
+        logger,
+        "Tinode session committed",
+        request_id=request_id,
+        user_id=user["id"],
+        tinode_user_id=payload.get("tinode_user_id"),
     )
     return TinodeSessionResponse(**payload)
 

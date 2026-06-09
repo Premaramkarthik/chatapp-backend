@@ -141,6 +141,10 @@ class KeycloakAuthClient:
         """Send a verify-only email (legacy alias)."""
         await self._admin.send_account_setup_email(user_id=user_id)
 
+    async def find_user_by_email(self, email: str) -> str | None:
+        """Return Keycloak user id for an exact email match."""
+        return await self._admin.find_user_by_email(email)
+
     async def clear_required_actions(self, *, user_id: str) -> None:
         """Remove pending Keycloak required actions on a user."""
         await self._admin.clear_required_actions(user_id=user_id)
@@ -171,6 +175,14 @@ class KeycloakAuthClient:
     ) -> None:
         """Update Keycloak profile fields for a user."""
         await self._admin.update_user_profile(user_id=user_id, display_name=display_name)
+
+    async def mark_email_verified(self, *, user_id: str) -> None:
+        """Mark a user's email as verified in Keycloak."""
+        await self._admin.mark_email_verified(user_id=user_id)
+
+    async def logout_user_sessions(self, *, user_id: str) -> None:
+        """Revoke all Keycloak SSO sessions for a user."""
+        await self._admin.logout_user_sessions(user_id=user_id)
 
     async def send_verify_email(self, *, user_id: str) -> None:
         """Send a pure email verification email."""

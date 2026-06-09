@@ -41,7 +41,7 @@ class FakeAuthService:
             expires_at=datetime(2026, 1, 1, tzinfo=UTC),
         )
 
-    async def signin_password(self, *, email: str, password: str, request):
+    async def signin_password(self, *, email: str, password: str, remember_me: bool, request):
         if password != "SecurePassw0rd!12":
             from v1.utils.base import AuthenticationError
 
@@ -82,9 +82,10 @@ class FakeAuthService:
             session_token="session-token",
             csrf_token="csrf-token",
             session=session,
-            post_signin_redirect_uri="http://localhost:8080/home/auth/callback",
+            post_signin_redirect_uri="http://localhost:8080/auth/callback",
             principal=KeycloakPrincipal(sub="kc-sub", email=email),
             user=user,
+            cookie_max_age_sec=2592000 if remember_me else None,
         )
 
     async def forgot_password(self, *, email: str, request) -> None:
@@ -114,6 +115,16 @@ class FakeAuthService:
 
     async def resend_signup_email(self, *, email: str, request):
         return SignupResult()
+
+    async def complete_email_verification(self, *, token: str, request):
+        if token == "expired-token-123456789":
+            from v1.utils.base import AuthenticationError
+
+            raise AuthenticationError(
+                "Verification link has expired",
+                code="email_verification_expired",
+            )
+        return None
 
     async def start_social_signup(
         self,
@@ -181,6 +192,25 @@ def test_signin_password_sets_session_cookies() -> None:
     cookie_names = {c.split("=")[0] for c in response.headers.get_list("set-cookie")}
     assert "pp_session" in cookie_names
     assert "pp_csrf" in cookie_names
+
+
+def test_signin_password_remember_me_sets_persistent_cookie() -> None:
+    app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/auth/signin/password",
+                json={
+                    "email": "user@example.com",
+                    "password": "SecurePassw0rd!12",
+                    "remember_me": True,
+                },
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert "Max-Age=2592000" in ",".join(response.headers.get_list("set-cookie"))
 
 
 def test_signin_password_rejects_invalid_credentials() -> None:
@@ -269,6 +299,51 @@ def test_signup_start_returns_verify_email_step() -> None:
     body = response.json()
     assert body["next_step"] == "verify_email"
     assert body.get("signup_token") is None
+
+
+def test_signup_verify_complete_returns_ok() -> None:
+    app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/auth/signup/verify/complete",
+                json={"token": "valid-token-123456789"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok", "next_step": "signin"}
+
+
+def test_signup_verify_complete_maps_expired_token() -> None:
+    app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/auth/signup/verify/complete",
+                json={"token": "expired-token-123456789"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 401
+    assert response.json()["error"]["code"] == "email_verification_expired"
+
+
+def test_signup_resend_returns_cooldown_sec() -> None:
+    app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
+    try:
+        with TestClient(app) as client:
+            response = client.post(
+                "/v1/auth/signup/resend",
+                json={"email": "user@example.com"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 202
+    assert response.json()["cooldown_sec"] == 60
 
 
 def test_signup_complete_returns_verify_email_step() -> None:

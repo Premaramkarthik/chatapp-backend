@@ -5,7 +5,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from core.config.settings import settings
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_info
+from domains.auth.email_verification import AppEmailVerificationIssuer
 from domains.auth.keycloak_client import KeycloakAuthClient, keycloak_auth_client
 from domains.auth.models import SignupStartResult
 from domains.auth.security import expires_in, generate_token, hash_secret
@@ -28,10 +29,14 @@ class SignupStartProvisioner:
         user_repository: PostgresUserRepository | None = None,
         auth_repository: PostgresAuthRepository | None = None,
         keycloak: KeycloakAuthClient | None = None,
+        email_verification: AppEmailVerificationIssuer | None = None,
     ) -> None:
         self._user_repository = user_repository or PostgresUserRepository()
         self._auth_repository = auth_repository or PostgresAuthRepository()
         self._keycloak = keycloak or keycloak_auth_client
+        self._email_verification = email_verification or AppEmailVerificationIssuer(
+            auth_repository=self._auth_repository,
+        )
 
     async def get_or_create_pending_user(
         self,
@@ -64,22 +69,24 @@ class SignupStartProvisioner:
             required_actions=[],
         )
         if user.keycloak_sub is None:
-            logger.info(
-                "keycloak_user_created request_id={} user_id={} keycloak_sub={}",
-                request_id,
-                user.id,
-                keycloak_sub,
+            log_info(
+                logger,
+                "Keycloak user account created for signup",
+                request_id=request_id,
+                user_id=user.id,
+                keycloak_sub=keycloak_sub,
             )
             await self._keycloak.set_user_password(
                 user_id=keycloak_sub,
                 password=password,
                 temporary=False,
             )
-            logger.info(
-                "keycloak_password_set request_id={} user_id={} keycloak_sub={}",
-                request_id,
-                user.id,
-                keycloak_sub,
+            log_info(
+                logger,
+                "Keycloak password set for new signup user",
+                request_id=request_id,
+                user_id=user.id,
+                keycloak_sub=keycloak_sub,
             )
             user = await self._user_repository.link_keycloak_subject(
                 user_id=user.id,
@@ -94,19 +101,21 @@ class SignupStartProvisioner:
             aggregate_id=user.id,
             payload={"created_via": "email"},
         )
-        logger.info(
-            "verification_email_requested request_id={} user_id={} keycloak_sub={}",
-            request_id,
-            user.id,
-            keycloak_sub,
+        log_info(
+            logger,
+            "Sending app verification email for new signup",
+            request_id=request_id,
+            user_id=user.id,
+            keycloak_sub=keycloak_sub,
         )
-        await self._keycloak.send_verification_email(user_id=keycloak_sub)
+        await self._email_verification.issue_and_send(user=user)
         await self._user_repository.mark_verification_sent(user_id=user.id)
-        logger.info(
-            "verification_email_sent request_id={} user_id={} keycloak_sub={}",
-            request_id,
-            user.id,
-            keycloak_sub,
+        log_info(
+            logger,
+            "App verification email sent for new signup",
+            request_id=request_id,
+            user_id=user.id,
+            keycloak_sub=keycloak_sub,
         )
 
         await self._auth_repository.write_outbox_event(

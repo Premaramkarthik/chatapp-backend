@@ -71,6 +71,35 @@ async def test_clear_required_actions_clears_user_fields() -> None:
 
 
 @pytest.mark.asyncio
+async def test_mark_email_verified_updates_user_field() -> None:
+    """mark_email_verified sets Keycloak emailVerified=true."""
+    admin = KeycloakAdminClient()
+    admin.update_user = AsyncMock()  # type: ignore[method-assign]
+
+    await admin.mark_email_verified(user_id="user-123")
+
+    admin.update_user.assert_awaited_once_with(
+        user_id="user-123",
+        fields={"emailVerified": True},
+    )
+
+
+@pytest.mark.asyncio
+async def test_logout_user_sessions_calls_admin_logout_endpoint() -> None:
+    """logout_user_sessions issues POST to the Keycloak user logout endpoint."""
+    admin = KeycloakAdminClient()
+    admin.get_admin_token = AsyncMock(return_value="token")  # type: ignore[method-assign]
+    admin._request = AsyncMock()  # type: ignore[method-assign]
+
+    await admin.logout_user_sessions(user_id="user-123")
+
+    admin._request.assert_awaited_once()
+    assert admin._request.await_args.args[0] == "POST"
+    assert admin._request.await_args.kwargs["operation"] == "logout_user_sessions"
+    assert admin._request.await_args.kwargs["keycloak_user_id"] == "user-123"
+
+
+@pytest.mark.asyncio
 async def test_send_account_setup_email_is_verify_only() -> None:
     """Legacy setup email path must not trigger execute-actions wizard."""
     admin = KeycloakAdminClient()

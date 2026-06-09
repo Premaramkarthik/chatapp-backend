@@ -4,17 +4,12 @@ from __future__ import annotations
 
 from typing import Any
 
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_info, log_warning
 from infrastructure.database.connection import call_json_function
 from infrastructure.database.repositories.conversations import PostgresConversationRepository
 from infrastructure.tinode.grpc_client import TinodeGrpcError, prepare_p2p_conversation
 
 logger = get_logger(__name__)
-
-_LOG_PROVISION_COMMITTED = (
-    "conversation_provision_committed request_id={} connection_id={} "
-    "tinode_topic_id={} status=active"
-)
 
 
 class ProvisionError(RuntimeError):
@@ -29,11 +24,12 @@ async def provision_conversation_for_connection(
 ) -> dict[str, Any]:
     """Create or activate a Tinode mapping with real P2P topic identifiers."""
     connection_id = str(connection["id"])
-    logger.info(
-        "conversation_provision_received request_id={} connection_id={} created_by_user_id={}",
-        request_id,
-        connection_id,
-        created_by_user_id,
+    log_info(
+        logger,
+        "Conversation provision request received",
+        request_id=request_id,
+        connection_id=connection_id,
+        created_by_user_id=created_by_user_id,
     )
     repo = PostgresConversationRepository()
     mapping = await repo.provision_for_connection(
@@ -41,11 +37,13 @@ async def provision_conversation_for_connection(
         created_by_user_id=created_by_user_id,
     )
     if mapping.get("status") == "active" and mapping.get("tinode_topic_id", "").startswith("p2p"):
-        logger.info(
-            _LOG_PROVISION_COMMITTED,
-            request_id,
-            connection_id,
-            mapping.get("tinode_topic_id"),
+        log_info(
+            logger,
+            "Conversation provision committed with active Tinode mapping",
+            request_id=request_id,
+            connection_id=connection_id,
+            tinode_topic_id=mapping.get("tinode_topic_id"),
+            status="active",
         )
         return mapping
 
@@ -58,10 +56,11 @@ async def provision_conversation_for_connection(
             connection_id=connection_id,
             status="failed",
         )
-        logger.warning(
-            "conversation_provision_failed request_id={} connection_id={} reason=tinode_not_linked",
-            request_id,
-            connection_id,
+        log_warning(
+            logger,
+            "Conversation provision failed because Tinode is not linked for both users",
+            request_id=request_id,
+            connection_id=connection_id,
         )
         raise ProvisionError("Both users must complete Tinode link before provisioning")
 
@@ -81,11 +80,12 @@ async def provision_conversation_for_connection(
             connection_id=connection_id,
             status="failed",
         )
-        logger.warning(
-            "conversation_provision_failed request_id={} connection_id={} reason={}",
-            request_id,
-            connection_id,
-            exc,
+        log_warning(
+            logger,
+            "Conversation provision failed",
+            request_id=request_id,
+            connection_id=connection_id,
+            reason=str(exc),
         )
         raise ProvisionError(str(exc)) from exc
 
@@ -100,11 +100,13 @@ async def provision_conversation_for_connection(
         tinode_topic_name=topic_name,
         status="active",
     )
-    logger.info(
-        _LOG_PROVISION_COMMITTED,
-        request_id,
-        connection_id,
-        updated.get("tinode_topic_id"),
+    log_info(
+        logger,
+        "Conversation provision committed with active Tinode mapping",
+        request_id=request_id,
+        connection_id=connection_id,
+        tinode_topic_id=updated.get("tinode_topic_id"),
+        status="active",
     )
     return updated
 

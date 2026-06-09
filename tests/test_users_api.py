@@ -72,6 +72,59 @@ def test_auth_session_returns_null_account_mode_for_pending_profile_setup(
     assert body["email"] == "user@example.com"
 
 
+def test_update_account_mode_without_profile_capability(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Authenticated users can update account mode without profile:update in JWT."""
+    updated_mode: str | None = None
+
+    class FakeUserRepository:
+        async def update_account_mode(self, *, keycloak_sub: str, account_mode: str) -> User:
+            nonlocal updated_mode
+            updated_mode = account_mode
+            now = datetime(2026, 1, 1, tzinfo=UTC)
+            return User(
+                id=str(uuid4()),
+                keycloak_sub=keycloak_sub,
+                email="user@example.com",
+                display_name="Google User",
+                status="active",
+                account_mode=account_mode,
+                email_verified=True,
+                created_via="google",
+                created_at=now,
+                updated_at=now,
+            )
+
+    monkeypatch.setattr(
+        "v1.middleware.authentication.settings.middleware.auth_enabled",
+        False,
+    )
+    app.dependency_overrides[get_current_principal] = lambda: KeycloakPrincipal(
+        sub="google-sub-123",
+        email="user@example.com",
+        email_verified=True,
+        display_name="Google User",
+        preferred_username="user@example.com",
+        identity_provider="google",
+        roles=[],
+    )
+    app.dependency_overrides[get_bootstrap_user_use_case] = lambda: FakeBootstrapUser()
+    monkeypatch.setattr("v1.routers.users.PostgresUserRepository", FakeUserRepository)
+    try:
+        with TestClient(app) as client:
+            response = client.patch(
+                "/v1/users/account-mode",
+                json={"account_mode": "messenger"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert updated_mode == "messenger"
+    assert response.json()["account_mode"] == "messenger"
+
+
 def test_delete_my_account_returns_204(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

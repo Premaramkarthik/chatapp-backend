@@ -11,8 +11,7 @@ import jwt
 from jwt import InvalidTokenError, PyJWK, PyJWKClient
 
 from core.config.settings import settings
-from core.logging.domain_events import JWT_VALIDATION_FAILED, log_domain_event
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_debug, log_warning
 from infrastructure.redis.cache import auth_redis_cache
 from v1.schemas.principal import KeycloakPrincipal
 from v1.utils.base import AuthenticationError
@@ -52,16 +51,20 @@ class KeycloakVerifier:
                 leeway=settings.jwt.clock_leeway_sec,
             )
         except InvalidTokenError as exc:
-            log_domain_event(JWT_VALIDATION_FAILED, error_type=type(exc).__name__)
-            logger.warning("keycloak_token_rejected error_type={}", type(exc).__name__)
+            log_warning(
+                logger,
+                "Keycloak access token was rejected",
+                error_type=type(exc).__name__,
+            )
             raise AuthenticationError("Invalid authentication token") from exc
 
         roles = _extract_roles(claims)
         email_verified = bool(claims.get("email_verified", False))
-        logger.debug(
-            "keycloak_token_verified sub={} email_verified={}",
-            claims.get("sub"),
-            email_verified,
+        log_debug(
+            logger,
+            "Keycloak access token verified",
+            sub=claims.get("sub"),
+            email_verified=email_verified,
         )
         return KeycloakPrincipal(
             sub=str(claims["sub"]),
@@ -82,7 +85,7 @@ class KeycloakVerifier:
             try:
                 return _signing_key_from_jwks(jwks, token)
             except InvalidTokenError:
-                logger.debug("redis_jwks_match_failed falling_back_to_live_jwks")
+                log_debug(logger, "Cached JWKS did not match token; falling back to live JWKS")
 
         return await asyncio.to_thread(
             self._jwks_client.get_signing_key_from_jwt,
@@ -130,7 +133,11 @@ class KeycloakVerifier:
                     ttl_sec=settings.keycloak.stale_jwks_ttl_sec,
                 )
         except Exception as exc:
-            logger.warning("keycloak_jwks_refresh_failed error_type={}", type(exc).__name__)
+            log_warning(
+                logger,
+                "Keycloak JWKS refresh failed",
+                error_type=type(exc).__name__,
+            )
             raise
 
 

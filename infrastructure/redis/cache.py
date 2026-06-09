@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.config.settings import settings
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_warning
 from core.observability.prometheus_metrics import AUTH_REDIS_FALLBACK_TOTAL
 
 logger = get_logger(__name__)
@@ -128,7 +128,12 @@ class AuthRedisCache:
             return await client.get(key)
         except Exception as exc:
             AUTH_REDIS_FALLBACK_TOTAL.labels(reason=type(exc).__name__).inc()
-            logger.warning("redis_get_failed key={} error_type={}", key, type(exc).__name__)
+            log_warning(
+                logger,
+                "Redis get failed; using in-memory fallback",
+                key=key,
+                error_type=type(exc).__name__,
+            )
             return await self._fallback.get(key)
 
     async def set_text(
@@ -145,7 +150,12 @@ class AuthRedisCache:
             return bool(await client.set(key, value, ex=ttl_sec, nx=nx))
         except Exception as exc:
             AUTH_REDIS_FALLBACK_TOTAL.labels(reason=type(exc).__name__).inc()
-            logger.warning("redis_set_failed key={} error_type={}", key, type(exc).__name__)
+            log_warning(
+                logger,
+                "Redis set failed; using in-memory fallback",
+                key=key,
+                error_type=type(exc).__name__,
+            )
             return await self._fallback.set(key, value, ex=ttl_sec, nx=nx)
 
     async def get_json(self, key: str) -> dict[str, Any] | None:
@@ -166,7 +176,11 @@ class AuthRedisCache:
             return int(await client.delete(*keys))
         except Exception as exc:
             AUTH_REDIS_FALLBACK_TOTAL.labels(reason=type(exc).__name__).inc()
-            logger.warning("redis_delete_failed error_type={}", type(exc).__name__)
+            log_warning(
+                logger,
+                "Redis delete failed; using in-memory fallback",
+                error_type=type(exc).__name__,
+            )
             return await self._fallback.delete(*keys)
 
     async def increment(self, key: str, *, ttl_sec: int) -> int:
@@ -179,7 +193,12 @@ class AuthRedisCache:
             return value
         except Exception as exc:
             AUTH_REDIS_FALLBACK_TOTAL.labels(reason=type(exc).__name__).inc()
-            logger.warning("redis_increment_failed key={} error_type={}", key, type(exc).__name__)
+            log_warning(
+                logger,
+                "Redis increment failed; using in-memory fallback",
+                key=key,
+                error_type=type(exc).__name__,
+            )
             value = await self._fallback.incr(key)
             if value == 1:
                 await self._fallback.expire(key, ttl_sec)

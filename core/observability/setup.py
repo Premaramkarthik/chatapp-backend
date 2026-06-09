@@ -5,7 +5,7 @@ from __future__ import annotations
 from typing import TYPE_CHECKING
 
 from core.config.settings import settings
-from core.logging.logger import get_logger
+from core.logging.logger import get_logger, log_info
 from core.observability.logging_context import observability_log_patcher
 from core.observability.tracing import setup_tracing
 
@@ -31,4 +31,4 @@ def init_observability(app: FastAPI) -> None:
             should_group_status_codes=True,
             excluded_handlers=["/metrics", "/health/live", "/health/ready"],
         ).instrument(app)
-        logger.info("prometheus_instrumentator_enabled")
+        log_info(logger, "Prometheus FastAPI instrumentator enabled")

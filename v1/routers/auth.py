@@ -22,10 +22,13 @@ from v1.dependencies.auth import (
 )
 from v1.dependencies.container import get_auth_service, get_bootstrap_user_use_case
 from v1.schemas.auth_bff import (
+    EmailVerificationCompleteRequest,
+    EmailVerificationCompleteResponse,
     ForgotPasswordRequest,
     GenericAuthResponse,
     LogoutResponse,
     OnboardingCompleteRequest,
+    ResetPasswordCompleteRequest,
     RevokeAllSessionsRequest,
     RevokeAllSessionsResponse,
     SessionResponse,
@@ -89,9 +92,15 @@ async def signin_password(
     result = await auth_service.signin_password(
         email=str(payload.email),
         password=payload.password.get_secret_value(),
+        remember_me=payload.remember_me,
         request=request,
     )
-    _set_auth_cookies(response, result.session_token, result.csrf_token)
+    _set_auth_cookies(
+        response,
+        result.session_token,
+        result.csrf_token,
+        max_age=result.cookie_max_age_sec,
+    )
     return SigninPasswordResponse(user=UserResponse.model_validate(result.user.to_dict()))
 
 
@@ -199,7 +208,39 @@ async def signup_resend(
 ) -> SignupAcceptedResponse:
     """Resend account verification/setup email with abuse controls."""
     result = await auth_service.resend_signup_email(email=str(payload.email), request=request)
-    return SignupAcceptedResponse(status=result.status, next_step=result.next_step)
+    return SignupAcceptedResponse(
+        status=result.status,
+        next_step=result.next_step,
+        cooldown_sec=settings.auth.signup_resend_cooldown_sec,
+    )
+
+
+@router.post(
+    "/signup/verify/complete",
+    response_model=EmailVerificationCompleteResponse,
+)
+async def signup_verify_complete(
+    payload: EmailVerificationCompleteRequest,
+    request: Request,
+    auth_service: AuthServiceDependency,
+) -> EmailVerificationCompleteResponse:
+    """Consume an app-owned email verification token."""
+    await auth_service.complete_email_verification(token=payload.token, request=request)
+    return EmailVerificationCompleteResponse()
+
+
+@router.get(
+    "/signup/verify/complete",
+    response_model=EmailVerificationCompleteResponse,
+)
+async def signup_verify_complete_get(
+    request: Request,
+    auth_service: AuthServiceDependency,
+    token: str = Query(..., min_length=16, max_length=512),
+) -> EmailVerificationCompleteResponse:
+    """Consume an app-owned email verification token from a browser-safe GET."""
+    await auth_service.complete_email_verification(token=token, request=request)
+    return EmailVerificationCompleteResponse()
 
 
 @router.post("/signup/social/start", response_model=SigninStartResponse)
@@ -240,7 +281,12 @@ async def signin_callback(
             result.user.to_dict(),
         )
         response = RedirectResponse(redirect_target, status_code=303)
-        _set_auth_cookies(response, result.session_token, result.csrf_token)
+        _set_auth_cookies(
+            response,
+            result.session_token,
+            result.csrf_token,
+            max_age=result.cookie_max_age_sec,
+        )
         return response
     except SigninCallbackError as exc:
         redirect_uri = exc.post_signin_redirect_uri
@@ -272,20 +318,35 @@ async def forgot_password(
     request: Request,
     auth_service: AuthServiceDependency,
 ) -> GenericAuthResponse:
-    """Trigger a Keycloak password reset email with generic public response."""
+    """Send an app-owned password reset email with generic public response."""
     await auth_service.forgot_password(email=str(payload.email), request=request)
+    return GenericAuthResponse()
+
+
+@router.post("/reset-password/complete", response_model=GenericAuthResponse)
+async def reset_password_complete(
+    payload: ResetPasswordCompleteRequest,
+    request: Request,
+    auth_service: AuthServiceDependency,
+) -> GenericAuthResponse:
+    """Complete app-owned password reset using a one-time token."""
+    await auth_service.complete_password_reset(
+        token=payload.token,
+        password=payload.password.get_secret_value(),
+        request=request,
+    )
     return GenericAuthResponse()
 
 
 @router.get("/sessions", response_model=list[SessionResponse])
 async def list_sessions(
+    request: Request,
     _: SessionManager,
-    principal: CurrentPrincipal,
     session: CurrentSession,
     auth_service: AuthServiceDependency,
 ) -> list[SessionResponse]:
     """List the current user's active sessions."""
-    sessions = await auth_service.list_sessions(user_id=session.user_id)
+    sessions = await auth_service.list_sessions(user_id=session.user_id, request=request)
     return [
         SessionResponse(
             id=item.id,
@@ -293,6 +354,7 @@ async def list_sessions(
             device_label=item.device_label,
             last_seen_at=item.last_seen_at,
             created_at=item.created_at,
+            is_current=item.id == session.id,
         )
         for item in sessions
     ]
@@ -310,6 +372,7 @@ async def revoke_all_sessions(
     keep_session_id = session.id if payload.keep_current else None
     count = await auth_service.revoke_all_sessions(
         user_id=session.user_id,
+        keycloak_sub=session.keycloak_sub,
         keep_session_id=keep_session_id,
         request=request,
     )
@@ -351,11 +414,17 @@ def _redirect_with_user_payload(redirect_uri: str, user: dict) -> str:
     return f"{redirect_uri}#u={payload}"
 
 
-def _set_auth_cookies(response: Response, session_token: str, csrf_token: str) -> None:
+def _set_auth_cookies(
+    response: Response,
+    session_token: str,
+    csrf_token: str,
+    *,
+    max_age: int | None,
+) -> None:
     response.set_cookie(
         settings.auth.cookie_name,
         session_token,
-        max_age=settings.auth.session_max_sec,
+        max_age=max_age,
         secure=settings.auth.cookie_secure,
         httponly=True,
         samesite=settings.auth.cookie_samesite,
@@ -364,7 +433,7 @@ def _set_auth_cookies(response: Response, session_token: str, csrf_token: str) -
     response.set_cookie(
         settings.auth.csrf_cookie_name,
         csrf_token,
-        max_age=settings.auth.session_max_sec,
+        max_age=max_age,
         secure=settings.auth.cookie_secure,
         httponly=False,
         samesite=settings.auth.cookie_samesite,

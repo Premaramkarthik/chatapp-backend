@@ -1,6 +1,7 @@
 {
   "realm": "chatapp",
   "enabled": true,
+  "emailTheme": "paripath",
   "registrationAllowed": false,
   "resetPasswordAllowed": true,
   "rememberMe": true,
@@ -103,6 +104,14 @@
       "serviceAccountsEnabled": false,
       "redirectUris": [
         "http://localhost:8000/v1/auth/signin/callback",
+        "http://localhost:8080/auth/callback",
+        "http://localhost:8080/verify-email/complete",
+        "http://127.0.0.1:8080/auth/callback",
+        "http://127.0.0.1:8080/verify-email/complete",
+        "http://localhost:5173/auth/callback",
+        "http://localhost:5173/verify-email/complete",
+        "http://127.0.0.1:5173/auth/callback",
+        "http://127.0.0.1:5173/verify-email/complete",
         "http://localhost:5173/home/auth/callback",
         "http://127.0.0.1:5173/home/auth/callback",
         "http://localhost:5173/home/verify-email/complete",
