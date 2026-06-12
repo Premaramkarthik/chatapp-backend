@@ -44,11 +44,11 @@ async def _local_user_id(principal: KeycloakPrincipal) -> str:
     return user.id
 
 
-def _require_traveler_mode(account_mode: str) -> None:
-    if account_mode not in ("traveler", "both"):
+def _require_traveler_mode(account_mode: str | None) -> None:
+    if account_mode != "traveler":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Traveler profile requires account_mode traveler or both",
+            detail="Traveler profile requires account_mode traveler",
         )
 
 

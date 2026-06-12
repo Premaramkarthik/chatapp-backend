@@ -60,7 +60,7 @@ def test_session_state_machine_allows_refresh_cycle() -> None:
 
 
 def test_account_modes_are_business_state_not_roles() -> None:
-    assert {mode.value for mode in AccountMode} == {"traveler", "messenger", "both"}
+    assert {mode.value for mode in AccountMode} == {"traveler", "messenger"}
 
 
 def test_anomaly_classification_thresholds() -> None:

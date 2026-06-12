@@ -288,7 +288,7 @@ BEGIN
         IF NULLIF(payload->>'display_name', '') IS NULL THEN
             RAISE EXCEPTION 'display_name is required';
         END IF;
-        IF payload->>'account_mode' NOT IN ('traveler', 'messenger', 'both') THEN
+        IF payload->>'account_mode' NOT IN ('traveler', 'messenger') THEN
             RAISE EXCEPTION 'invalid account_mode';
         END IF;
 

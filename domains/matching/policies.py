@@ -9,9 +9,6 @@ CONNECTION_REQUIRES_MUTUAL_ACCEPT = True
 SEARCH_PRIMARY_FIELD = "destination_country"
 SEARCH_INCLUDE_CURRENT_COUNTRY = True
 
-# Users with account_mode "both" may search as messenger and appear in traveler discovery.
-BOTH_MODE_CAN_SEARCH_AND_BE_DISCOVERED = True
-
 # Pending requests expire on read when expires_at < now() (no batch job in v1).
 REQUEST_EXPIRY_CHECK_ON_READ = True
 

@@ -12,7 +12,6 @@ class AccountMode(StrEnum):
 
     TRAVELER = "traveler"
     MESSENGER = "messenger"
-    BOTH = "both"
 
 
 class UserStatus(StrEnum):

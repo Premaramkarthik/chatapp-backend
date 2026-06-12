@@ -404,7 +404,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_account_mode_check') THEN
         ALTER TABLE users ADD CONSTRAINT users_account_mode_check CHECK (
             account_mode IS NULL
-            OR account_mode IN ('traveler', 'messenger', 'both')
+            OR account_mode IN ('traveler', 'messenger')
         );
     END IF;
 

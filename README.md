@@ -312,7 +312,7 @@ Built on `asyncpg` with:
 | Method | Endpoint | Auth | Description |
 |---|---|---|---|
 | `GET` | `/me` | Bearer/Session | Get or bootstrap current user |
-| `PATCH` | `/me/account-mode` | `profile:update` | Update account mode (traveler/messenger/both) |
+| `PATCH` | `/me/account-mode` | `profile:update` | Update account mode (traveler/messenger) |
 
 ### Travelers (`/v1/travelers`)
 
@@ -407,7 +407,7 @@ Core orchestration for the entire authentication lifecycle:
 - `User` dataclass — Immutable domain entity with lifecycle states (`pending_verification` → `active`)
 - `UserRepository` protocol — Persistence port with 8 operations
 - `BootstrapUser` use case — Idempotent user creation on first authenticated access
-- `AccountMode` enum — `traveler`, `messenger`, `both`
+- `AccountMode` enum — `traveler`, `messenger`
 
 ### Chat Domain (`domains/chat/`)
 
@@ -420,7 +420,7 @@ Core orchestration for the entire authentication lifecycle:
 Product rules for traveler discovery:
 - Mutual accept required before connections
 - Connection requests expire after 14 days (checked on read)
-- Users with `account_mode=both` can search and be discovered
+- Only users with `account_mode=traveler` appear in traveler discovery
 
 ### Search Domain (`domains/search/`)
 

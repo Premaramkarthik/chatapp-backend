@@ -113,7 +113,7 @@ BEGIN
     END IF;
 
     IF ctx.connection_availability IS NULL
-       OR ctx.account_mode NOT IN ('traveler', 'both') THEN
+       OR ctx.account_mode <> 'traveler' THEN
         DELETE FROM traveler_discovery_snapshots WHERE user_id = p_user_id;
         PERFORM social_enqueue_search_outbox(p_user_id, 'delete');
         RETURN NULL;
