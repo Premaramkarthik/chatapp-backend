@@ -119,7 +119,7 @@ Users move through statuses defined in migrations:
 | Status | Meaning |
 |--------|---------|
 | `pending_verification` | Signed up; email not verified / not activated locally |
-| `pending_profile_setup` | Verified; needs display name + role (traveler vs messenger) |
+| `pending_profile_setup` | Verified; needs display name + role (explorer vs connector) |
 | `active` | Fully onboarded |
 | `restricted` | Signup provisioning failed |
 
@@ -223,10 +223,10 @@ After sign-in, frontend checks user status:
 // connect-carry/src/app/auth/lib/post-auth-routing.ts
 pending_verification → /verify-email/sent
 needs onboarding     → /onboarding
-active + account_mode → /traveler or /messenger
+active + account_mode → /explorer or /connector
 ```
 
-**`POST /v1/auth/onboarding/complete`** (authenticated) sets display name + `account_mode` (`traveler` | `messenger`), updates Keycloak profile, moves user to `active`.
+**`POST /v1/auth/onboarding/complete`** (authenticated) sets display name + `account_mode` (`explorer` | `connector`), updates Keycloak profile, moves user to `active`.
 
 There is also **`POST /v1/auth/signup/complete`** for completing profile during signup with a `signup_token` (step 2 of signup flow if used).
 

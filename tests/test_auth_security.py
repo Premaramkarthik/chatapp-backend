@@ -60,7 +60,7 @@ def test_session_state_machine_allows_refresh_cycle() -> None:
 
 
 def test_account_modes_are_business_state_not_roles() -> None:
-    assert {mode.value for mode in AccountMode} == {"traveler", "messenger"}
+    assert {mode.value for mode in AccountMode} == {"explorer", "connector"}
 
 
 def test_anomaly_classification_thresholds() -> None:
@@ -77,8 +77,8 @@ def test_signup_email_helpers_normalize_and_block_disposable_domains() -> None:
 
 
 def test_idempotency_request_hash_is_stable() -> None:
-    first = request_hash({"email": "user@example.com", "account_mode": "traveler"})
-    second = request_hash({"account_mode": "traveler", "email": "user@example.com"})
+    first = request_hash({"email": "user@example.com", "account_mode": "explorer"})
+    second = request_hash({"account_mode": "explorer", "email": "user@example.com"})
 
     assert first == second
 

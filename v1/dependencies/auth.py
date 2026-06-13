@@ -60,3 +60,22 @@ def require_capability(capability: str) -> Callable:
         )
 
     return dependency
+
+
+def require_any_capability(*capabilities: str) -> Callable:
+    """Build a FastAPI dependency requiring at least one client/API capability role."""
+
+    async def dependency(
+        principal: Annotated[KeycloakPrincipal, Depends(get_current_principal)],
+    ) -> KeycloakPrincipal:
+        if "admin" in principal.roles or any(
+            capability in principal.roles for capability in capabilities
+        ):
+            return principal
+        missing = ", ".join(capabilities)
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail=f"Missing required capability (one of): {missing}",
+        )
+
+    return dependency

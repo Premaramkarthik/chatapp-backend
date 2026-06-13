@@ -18,10 +18,10 @@ from infrastructure.keycloak.realm_bootstrap import ensure_keycloak_realm
 from infrastructure.keycloak.smtp_config import ensure_keycloak_smtp
 from infrastructure.keycloak.startup_validation import validate_keycloak_startup
 from infrastructure.meilisearch.client import get_meilisearch_client
-from infrastructure.meilisearch.index_settings import ensure_traveler_index_settings
+from infrastructure.meilisearch.index_settings import ensure_explorer_index_settings
 from infrastructure.redis.cache import auth_redis_cache
 from v1.middleware import setup_middleware
-from v1.routers import auth, chat, connections, geo, health, internal, travelers, users
+from v1.routers import auth, chat, connections, explorers, geo, health, internal, users
 
 
 @asynccontextmanager
@@ -42,9 +42,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if settings.meilisearch.enabled:
             client = get_meilisearch_client()
             await asyncio.to_thread(
-                ensure_traveler_index_settings,
+                ensure_explorer_index_settings,
                 client,
-                settings.meilisearch.traveler_index,
+                settings.meilisearch.explorer_index,
             )
             outbox_task = asyncio.create_task(run_search_outbox_loop(outbox_stop))
         if settings.auth.verification_reconcile_enabled:
@@ -88,7 +88,7 @@ def create_app() -> FastAPI:
     api.include_router(health.router)
     api.include_router(auth.router)
     api.include_router(users.router)
-    api.include_router(travelers.router)
+    api.include_router(explorers.router)
     api.include_router(connections.router)
     api.include_router(chat.router)
     api.include_router(internal.router)

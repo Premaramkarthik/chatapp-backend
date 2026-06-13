@@ -524,7 +524,7 @@ class MeilisearchSettings(EnvSettings):
     enabled: bool = Field(True, alias="MEILI_ENABLED")
     url: str = Field("http://localhost:7700", alias="MEILI_URL")
     master_key: SecretStr = Field(SecretStr("dev-meili-master-key"), alias="MEILI_MASTER_KEY")
-    traveler_index: str = Field("travelers", alias="MEILI_TRAVELER_INDEX")
+    explorer_index: str = Field("explorers", alias="MEILI_EXPLORER_INDEX")
 
     @property
     def master_key_value(self) -> str:

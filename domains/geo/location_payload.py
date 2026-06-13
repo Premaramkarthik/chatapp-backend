@@ -75,7 +75,7 @@ def normalize_location_payload(
 
 
 def normalize_home_location_payload(**kwargs: Any) -> dict[str, Any]:
-    """Map home location API fields to traveler_profiles column names."""
+    """Map home location API fields to explorer_profiles column names."""
     fields = LocationFields(
         country_id=kwargs.get("home_country_id"),
         state_id=kwargs.get("home_state_id"),

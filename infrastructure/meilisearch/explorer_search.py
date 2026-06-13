@@ -1,4 +1,4 @@
-"""Messenger traveler search via Meilisearch."""
+"""Connector explorer search via Meilisearch."""
 
 from __future__ import annotations
 
@@ -9,8 +9,8 @@ from meilisearch import Client
 
 
 @dataclass(frozen=True)
-class TravelerSearchQuery:
-    """Parameters for destination-country-first traveler search."""
+class ExplorerSearchQuery:
+    """Parameters for destination-country-first explorer search."""
 
     destination_country: str
     q: str = ""
@@ -22,7 +22,7 @@ class TravelerSearchQuery:
     sort: list[str] | None = None
 
 
-def build_filter(query: TravelerSearchQuery) -> str:
+def build_filter(query: ExplorerSearchQuery) -> str:
     """Build a Meilisearch filter string (all fields must be filterable)."""
     parts = [
         f'destination_country = "{query.destination_country.upper()}"',
@@ -39,12 +39,12 @@ def build_filter(query: TravelerSearchQuery) -> str:
     return " AND ".join(parts)
 
 
-def search_travelers(
+def search_explorers(
     client: Client,
     index_uid: str,
-    query: TravelerSearchQuery,
+    query: ExplorerSearchQuery,
 ) -> dict:
-    """Run a Meilisearch search against the travelers index."""
+    """Run a Meilisearch search against the explorers index."""
     params: dict = {
         "filter": build_filter(query),
         "limit": query.limit,

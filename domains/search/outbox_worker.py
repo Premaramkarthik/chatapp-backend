@@ -12,7 +12,7 @@ from core.observability.prometheus_metrics import (
 )
 from infrastructure.database.repositories.discovery import PostgresDiscoveryRepository
 from infrastructure.meilisearch.client import get_meilisearch_client
-from infrastructure.meilisearch.sync import delete_traveler, upsert_traveler
+from infrastructure.meilisearch.sync import delete_explorer, upsert_explorer
 
 logger = get_logger(__name__)
 
@@ -28,20 +28,20 @@ async def process_search_outbox_once(*, batch_size: int = 50) -> int:
         return 0
 
     client = get_meilisearch_client()
-    index_uid = settings.meilisearch.traveler_index
+    index_uid = settings.meilisearch.explorer_index
 
     for event in events:
         event_id = str(event["id"])
         user_id = str(event["aggregate_id"])
         try:
             if event["event_type"] == "delete":
-                await asyncio.to_thread(delete_traveler, client, index_uid, user_id)
+                await asyncio.to_thread(delete_explorer, client, index_uid, user_id)
             else:
                 snapshot = await repo.get_snapshot(user_id)
                 if snapshot is None:
-                    await asyncio.to_thread(delete_traveler, client, index_uid, user_id)
+                    await asyncio.to_thread(delete_explorer, client, index_uid, user_id)
                 else:
-                    await asyncio.to_thread(upsert_traveler, client, index_uid, snapshot)
+                    await asyncio.to_thread(upsert_explorer, client, index_uid, snapshot)
             await repo.complete_outbox(event_id)
         except Exception as exc:
             log_warning(

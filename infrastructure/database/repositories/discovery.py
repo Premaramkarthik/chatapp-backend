@@ -9,7 +9,7 @@ from infrastructure.database.jsonb_helpers import list_from_jsonb, row_from_json
 
 
 class PostgresDiscoveryRepository:
-    """Postgres access for traveler_discovery_snapshots and search outbox."""
+    """Postgres access for explorer_discovery_snapshots and search outbox."""
 
     async def get_snapshot(self, user_id: str) -> dict[str, Any] | None:
         """Return a snapshot row by user id."""

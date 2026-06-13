@@ -17,7 +17,7 @@ class SigninStartRequest(BaseModel):
 
     post_signin_redirect_uri: str | None = None
     identity_provider: Literal["google", "apple"] | None = None
-    account_mode: Literal["traveler", "messenger"] | None = None
+    account_mode: Literal["explorer", "connector"] | None = None
     device_fingerprint: str | None = Field(default=None, min_length=8, max_length=256)
     captcha_token: str | None = Field(default=None, max_length=2048)
 
@@ -41,7 +41,7 @@ class OnboardingCompleteRequest(BaseModel):
     """Complete post-verification onboarding profile."""
 
     display_name: str = Field(min_length=1, max_length=120)
-    account_mode: Literal["traveler", "messenger"]
+    account_mode: Literal["explorer", "connector"]
 
     @field_validator("display_name")
     @classmethod
@@ -92,7 +92,7 @@ class SignupCompleteRequest(BaseModel):
 
     signup_token: str = Field(min_length=16, max_length=512)
     display_name: str = Field(min_length=1, max_length=120)
-    account_mode: Literal["traveler", "messenger"]
+    account_mode: Literal["explorer", "connector"]
 
     @field_validator("display_name")
     @classmethod
@@ -105,7 +105,7 @@ class SignupRequest(BaseModel):
 
     email: EmailStr
     display_name: str = Field(min_length=1, max_length=120)
-    account_mode: Literal["traveler", "messenger"]
+    account_mode: Literal["explorer", "connector"]
     device_fingerprint: str = Field(min_length=8, max_length=256)
     captcha_token: str | None = Field(default=None, max_length=2048)
     post_signin_redirect_uri: str | None = None
@@ -139,7 +139,7 @@ class SocialSignupStartRequest(BaseModel):
     """Begin social signup with captured app account mode."""
 
     identity_provider: Literal["google", "apple"]
-    account_mode: Literal["traveler", "messenger"]
+    account_mode: Literal["explorer", "connector"]
     device_fingerprint: str = Field(min_length=8, max_length=256)
     captcha_token: str | None = Field(default=None, max_length=2048)
     post_signin_redirect_uri: str | None = None

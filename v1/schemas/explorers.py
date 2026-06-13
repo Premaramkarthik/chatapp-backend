@@ -1,4 +1,4 @@
-"""Traveler and search API models."""
+"""Explorer and search API models."""
 
 from __future__ import annotations
 
@@ -19,8 +19,8 @@ class LocationDisplay(BaseModel):
     display_city: str | None = None
 
 
-class TravelerProfileResponse(BaseModel):
-    """Traveler profile returned to the authenticated user."""
+class ExplorerProfileResponse(BaseModel):
+    """Explorer profile returned to the authenticated user."""
 
     user_id: UUID
     headline: str | None = None
@@ -42,8 +42,8 @@ class TravelerProfileResponse(BaseModel):
     last_active_at: datetime | None = None
 
 
-class TravelerProfileUpdateRequest(BaseModel):
-    """Patch body for traveler profile."""
+class ExplorerProfileUpdateRequest(BaseModel):
+    """Patch body for explorer profile."""
 
     headline: str | None = None
     bio: str | None = None
@@ -60,7 +60,7 @@ class TravelerProfileUpdateRequest(BaseModel):
     visibility: Literal["discoverable", "connections_only", "hidden"] | None = None
 
     @model_validator(mode="after")
-    def validate_home_location(self) -> TravelerProfileUpdateRequest:
+    def validate_home_location(self) -> ExplorerProfileUpdateRequest:
         """Validate mutual exclusion for home location fields."""
         LocationFields(
             country_id=self.home_country_id,
@@ -135,8 +135,8 @@ class CurrentLocationUpdateRequest(BaseModel):
         return self
 
 
-class TravelerSearchResult(BaseModel):
-    """Public traveler card for search results."""
+class ExplorerSearchResult(BaseModel):
+    """Public explorer card for search results."""
 
     user_id: UUID
     display_name: str | None = None
@@ -151,10 +151,10 @@ class TravelerSearchResult(BaseModel):
     last_active_at: datetime | None = None
 
 
-class TravelerSearchResponse(BaseModel):
-    """Paginated traveler search response."""
+class ExplorerSearchResponse(BaseModel):
+    """Paginated explorer search response."""
 
-    hits: list[TravelerSearchResult]
+    hits: list[ExplorerSearchResult]
     total: int
     limit: int
     offset: int

@@ -103,7 +103,7 @@ sequenceDiagram
     FE->>BFF: POST /onboarding/complete
     BFF-->>FE: active user
   end
-  FE->>FE: Route to /traveler or /messenger
+  FE->>FE: Route to /explorer or /connector
 ```
 
 **Step 1 — Signup start**
@@ -134,7 +134,7 @@ curl -X POST http://localhost:8000/v1/auth/signup/complete \
   -d '{
     "signup_token": "<from signup/start if returned>",
     "display_name": "Jane Doe",
-    "account_mode": "traveler"
+    "account_mode": "explorer"
   }'
 ```
 
@@ -168,7 +168,7 @@ curl -X POST http://localhost:8000/v1/auth/onboarding/complete \
   -H "X-CSRF-Token: <pp_csrf cookie value>" \
   -d '{
     "display_name": "Jane Doe",
-    "account_mode": "traveler"
+    "account_mode": "explorer"
   }'
 ```
 
@@ -178,7 +178,7 @@ curl -X POST http://localhost:8000/v1/auth/onboarding/complete \
 |-------------|-------|
 | `pending_verification` | `/verify-email/sent` |
 | `pending_profile_setup` / missing role | `/onboarding` |
-| `active` + `account_mode` | `/traveler` or `/messenger` |
+| `active` + `account_mode` | `/explorer` or `/connector` |
 
 ---
 
@@ -220,7 +220,7 @@ curl -X POST http://localhost:8000/v1/auth/signup/social/start \
   -H "Content-Type: application/json" \
   -d '{
     "identity_provider": "google",
-    "account_mode": "messenger",
+    "account_mode": "connector",
     "device_fingerprint": "device-12345678",
     "post_signin_redirect_uri": "http://localhost:8080/auth/callback"
   }'

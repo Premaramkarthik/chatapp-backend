@@ -27,7 +27,7 @@ Single authoritative definition per database object, deterministic fresh-install
 | `003_create_auth_tables.sql` | `002_tables.sql`, `003_functions_core.sql` (partial `fn_users` dropped) |
 | `004_create_signup_lifecycle.sql` | `002_tables.sql`, `003_functions_core.sql` |
 | `005_geo_reference.sql` | `001_extensions.sql` (pg_trgm), `002_tables.sql`, `007_seeds_geo.sql` |
-| `006_traveler_messenger_profiles.sql` | `002_tables.sql`, `006_triggers.sql` |
+| `006_explorer_connector_profiles.sql` | `002_tables.sql`, `006_triggers.sql` |
 | `007_travel_plans.sql` | `002_tables.sql`, `006_triggers.sql` |
 | `008_discovery_connections.sql` | `002_tables.sql`, `006_triggers.sql` |
 | `009_tinode_conversations.sql` | `002_tables.sql`, `006_triggers.sql` |

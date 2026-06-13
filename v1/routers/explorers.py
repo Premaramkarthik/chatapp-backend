@@ -1,4 +1,4 @@
-"""Traveler profile, trips, location, and search routes."""
+"""Explorer profile, trips, location, and search routes."""
 
 from __future__ import annotations
 
@@ -12,27 +12,27 @@ from core.logging.logger import get_logger, log_info
 from domains.auth.security import hash_secret
 from domains.geo.display import enrich_home_location
 from infrastructure.database.repositories.discovery import PostgresDiscoveryRepository
+from infrastructure.database.repositories.explorers import PostgresExplorerRepository
 from infrastructure.database.repositories.matching import PostgresMatchingRepository
-from infrastructure.database.repositories.travelers import PostgresTravelerRepository
 from infrastructure.database.repositories.trips import PostgresTripRepository
 from infrastructure.database.repositories.users import PostgresUserRepository
 from infrastructure.meilisearch.client import get_meilisearch_client
-from infrastructure.meilisearch.traveler_search import TravelerSearchQuery, search_travelers
+from infrastructure.meilisearch.explorer_search import ExplorerSearchQuery, search_explorers
 from v1.dependencies.auth import get_current_principal, require_capability
-from v1.schemas.principal import KeycloakPrincipal
-from v1.schemas.travelers import (
+from v1.schemas.explorers import (
     CurrentLocationUpdateRequest,
-    TravelerProfileResponse,
-    TravelerProfileUpdateRequest,
-    TravelerSearchResponse,
-    TravelerSearchResult,
+    ExplorerProfileResponse,
+    ExplorerProfileUpdateRequest,
+    ExplorerSearchResponse,
+    ExplorerSearchResult,
     TravelPlanCreateRequest,
 )
+from v1.schemas.principal import KeycloakPrincipal
 from v1.utils.request_context import request_id_from
 
 logger = get_logger(__name__)
 
-router = APIRouter(prefix="/v1/travelers", tags=["travelers"])
+router = APIRouter(prefix="/v1/explorers", tags=["explorers"])
 CurrentPrincipal = Annotated[KeycloakPrincipal, Depends(get_current_principal)]
 TripCreator = Annotated[KeycloakPrincipal, Depends(require_capability("trip:create"))]
 TripSearcher = Annotated[KeycloakPrincipal, Depends(require_capability("trip:join"))]
@@ -45,61 +45,60 @@ async def _local_user_id(principal: KeycloakPrincipal) -> str:
     return user.id
 
 
-def _require_traveler_mode(account_mode: str | None) -> None:
-    if account_mode != "traveler":
+def _require_explorer_mode(account_mode: str | None) -> None:
+    if account_mode != "explorer":
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Traveler profile requires account_mode traveler",
+            detail="Explorer profile requires account_mode explorer",
         )
 
 
-@router.get("/profile", response_model=TravelerProfileResponse)
-async def get_traveler_profile(principal: CurrentPrincipal) -> TravelerProfileResponse:
-    """Return the authenticated user's traveler profile."""
+@router.get("/profile", response_model=ExplorerProfileResponse)
+async def get_explorer_profile(principal: CurrentPrincipal) -> ExplorerProfileResponse:
+    """Return the authenticated user's explorer profile."""
     user = await PostgresUserRepository().get_by_keycloak_sub(principal.sub)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    _require_traveler_mode(user.account_mode)
-    row = await PostgresTravelerRepository().get_traveler_profile(user.id)
+    _require_explorer_mode(user.account_mode)
+    row = await PostgresExplorerRepository().get_explorer_profile(user.id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
     fields = {k: v for k, v in row.items() if k != "user_id"}
     fields.update(await enrich_home_location(row))
-    return TravelerProfileResponse(user_id=UUID(row["user_id"]), **fields)
+    return ExplorerProfileResponse(user_id=UUID(row["user_id"]), **fields)
 
 
-@router.put("/profile", response_model=TravelerProfileResponse)
-async def upsert_traveler_profile(
+@router.put("/profile", response_model=ExplorerProfileResponse)
+async def upsert_explorer_profile(
     request: Request,
-    payload: TravelerProfileUpdateRequest,
-    _: TripCreator,
+    payload: ExplorerProfileUpdateRequest,
     principal: CurrentPrincipal,
-) -> TravelerProfileResponse:
-    """Create or update traveler profile and rebuild discovery snapshot."""
+) -> ExplorerProfileResponse:
+    """Create or update explorer profile and rebuild discovery snapshot."""
     request_id = request_id_from(request)
     user = await PostgresUserRepository().get_by_keycloak_sub(principal.sub)
     if user is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    _require_traveler_mode(user.account_mode)
+    _require_explorer_mode(user.account_mode)
     log_info(
         logger,
-        "Traveler profile upsert request received",
+        "Explorer profile upsert request received",
         request_id=request_id,
         user_id=user.id,
     )
-    row = await PostgresTravelerRepository().upsert_traveler_profile(
+    row = await PostgresExplorerRepository().upsert_explorer_profile(
         user.id,
         **payload.model_dump(exclude_unset=True),
     )
     log_info(
         logger,
-        "Traveler profile upsert committed",
+        "Explorer profile upsert committed",
         request_id=request_id,
         user_id=user.id,
     )
     fields = {k: v for k, v in row.items() if k != "user_id"}
     fields.update(await enrich_home_location(row))
-    return TravelerProfileResponse(user_id=UUID(row["user_id"]), **fields)
+    return ExplorerProfileResponse(user_id=UUID(row["user_id"]), **fields)
 
 
 @router.post("/trips", status_code=status.HTTP_201_CREATED)
@@ -143,7 +142,7 @@ async def update_current_location(
     _: TripCreator,
     principal: CurrentPrincipal,
 ) -> dict:
-    """Update traveler current location."""
+    """Update explorer current location."""
     user_id = await _local_user_id(principal)
     row = await PostgresTripRepository().upsert_current_location(
         user_id,
@@ -159,8 +158,8 @@ async def update_current_location(
     return {"location": dict(row)}
 
 
-@router.get("/search", response_model=TravelerSearchResponse)
-async def search_travelers_route(
+@router.get("/search", response_model=ExplorerSearchResponse)
+async def search_explorers_route(
     request: Request,
     _: TripSearcher,
     principal: CurrentPrincipal,
@@ -170,8 +169,8 @@ async def search_travelers_route(
     current_country: str | None = Query(None, min_length=2, max_length=2),
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
-) -> TravelerSearchResponse:
-    """Search discoverable travelers by destination country (Meilisearch + hydrate)."""
+) -> ExplorerSearchResponse:
+    """Search discoverable explorers by destination country (Meilisearch + hydrate)."""
     from core.config.settings import settings
 
     request_id = request_id_from(request)
@@ -179,18 +178,18 @@ async def search_travelers_route(
     viewer_id = await _local_user_id(principal)
     log_info(
         logger,
-        "Traveler search request received",
+        "Explorer search request received",
         request_id=request_id,
         viewer_id=viewer_id,
         destination_country=destination_country.upper(),
         query_hash=query_hash,
     )
     discovery = PostgresDiscoveryRepository()
-    hits: list[TravelerSearchResult] = []
+    hits: list[ExplorerSearchResult] = []
     total = 0
 
     if settings.meilisearch.enabled:
-        query = TravelerSearchQuery(
+        query = ExplorerSearchQuery(
             destination_country=destination_country.upper(),
             q=q,
             city_id=str(city_id) if city_id is not None else None,
@@ -200,9 +199,9 @@ async def search_travelers_route(
         )
         client = get_meilisearch_client()
         raw = await asyncio.to_thread(
-            search_travelers,
+            search_explorers,
             client,
-            settings.meilisearch.traveler_index,
+            settings.meilisearch.explorer_index,
             query,
         )
         total = int(raw.get("estimatedTotalHits") or raw.get("totalHits") or 0)
@@ -233,17 +232,17 @@ async def search_travelers_route(
 
     log_info(
         logger,
-        "Traveler search completed",
+        "Explorer search completed",
         request_id=request_id,
         viewer_id=viewer_id,
         hit_count=len(hits),
         total=total,
     )
-    return TravelerSearchResponse(hits=hits, total=total, limit=limit, offset=offset)
+    return ExplorerSearchResponse(hits=hits, total=total, limit=limit, offset=offset)
 
 
-def _snapshot_to_search_result(row: dict) -> TravelerSearchResult:
-    return TravelerSearchResult(
+def _snapshot_to_search_result(row: dict) -> ExplorerSearchResult:
+    return ExplorerSearchResult(
         user_id=UUID(str(row["user_id"])),
         display_name=row.get("display_name"),
         headline=row.get("headline"),

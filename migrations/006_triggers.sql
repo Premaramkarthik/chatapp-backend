@@ -23,15 +23,15 @@ BEFORE UPDATE ON auth_device_fingerprints
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_traveler_profiles_set_updated_at ON traveler_profiles;
-CREATE TRIGGER trg_traveler_profiles_set_updated_at
-BEFORE UPDATE ON traveler_profiles
+DROP TRIGGER IF EXISTS trg_explorer_profiles_set_updated_at ON explorer_profiles;
+CREATE TRIGGER trg_explorer_profiles_set_updated_at
+BEFORE UPDATE ON explorer_profiles
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
-DROP TRIGGER IF EXISTS trg_messenger_profiles_set_updated_at ON messenger_profiles;
-CREATE TRIGGER trg_messenger_profiles_set_updated_at
-BEFORE UPDATE ON messenger_profiles
+DROP TRIGGER IF EXISTS trg_connector_profiles_set_updated_at ON connector_profiles;
+CREATE TRIGGER trg_connector_profiles_set_updated_at
+BEFORE UPDATE ON connector_profiles
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 

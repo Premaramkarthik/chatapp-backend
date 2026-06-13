@@ -1,26 +1,28 @@
-# Travelers API — End-to-End Guide
+# Explorers API — End-to-End Guide
 
-This document describes the **Travelers** HTTP API exposed at `/v1/travelers/`*. It covers authentication, authorization, request/response shapes, database side effects, search behavior, and how the ConnectCarry frontend uses these endpoints.
+This document describes the **Explorers** HTTP API exposed at `/v1/explorers/*`. It covers authentication, authorization, request/response shapes, database side effects, search behavior, and how the ConnectCarry frontend uses these endpoints.
 
-**Source:** `[v1/routers/travelers.py](../v1/routers/travelers.py)`
+For the full **profile lifecycle** (signup → onboarding → account mode → explorer profile identity split), see [profile-api.md](./profile-api.md).
+
+**Source:** [`v1/routers/explorers.py`](../v1/routers/explorers.py)
 
 ---
 
 ## Overview
 
-The travelers API lets users:
+The explorers API lets users:
 
-1. **Maintain a traveler profile** (headline, bio, languages, visibility, etc.)
+1. **Maintain an explorer profile** (headline, bio, languages, visibility, etc.)
 2. **Create travel plans** with one or more destination countries/cities
 3. **Update current location** (country, city, coordinates)
-4. **Search discoverable travelers** heading to a destination country (for messengers)
+4. **Search discoverable explorers** heading to a destination country (for connectors)
 
-Profile, trip, and location writes rebuild a **discovery snapshot** in Postgres (`traveler_discovery_snapshots`). When Meilisearch is enabled, a background outbox syncs snapshots into the `travelers` search index for fast filtered search.
+Profile, trip, and location writes rebuild a **discovery snapshot** in Postgres (`explorer_discovery_snapshots`). When Meilisearch is enabled, a background outbox syncs snapshots into the `explorers` search index for fast filtered search.
 
 ```mermaid
 flowchart LR
   Client[Web / Mobile client]
-  BFF[FastAPI /v1/travelers]
+  BFF[FastAPI /v1/explorers]
   PG[(PostgreSQL)]
   Meili[(Meilisearch)]
 
@@ -51,13 +53,13 @@ Every handler resolves the Keycloak subject (`principal.sub`) to a row in `users
 
 ### Account mode
 
-Profile read/write enforces traveler account mode:
+Profile read/write enforces explorer account mode:
 
 
 | `users.account_mode` | `GET/PUT /profile`                                          |
 | -------------------- | ----------------------------------------------------------- |
-| `traveler`           | Allowed                                                     |
-| `messenger`          | **403** — `Traveler profile requires account_mode traveler` |
+| `explorer`           | Allowed                                                     |
+| `connector`          | **403** — `Explorer profile requires account_mode explorer` |
 
 
 Set account mode via `PATCH /v1/users/account-mode` after onboarding.
@@ -68,29 +70,29 @@ Set account mode via `PATCH /v1/users/account-mode` after onboarding.
 | Endpoint        | Required capability | Notes                                 |
 | --------------- | ------------------- | ------------------------------------- |
 | `GET /profile`  | Authenticated only  | No capability gate                    |
-| `PUT /profile`  | `trip:create`       | Also requires `account_mode=traveler` |
+| `PUT /profile`  | `trip:create`       | Also requires `account_mode=explorer` |
 | `POST /trips`   | `trip:create`       |                                       |
 | `PUT /location` | `trip:create`       |                                       |
-| `GET /search`   | `trip:join`         | Typical for messenger role            |
+| `GET /search`   | `trip:join`         | Typical for connector role            |
 
 
 Users with the `admin` role bypass capability checks.
 
-Default signup roles are configured in `config.yaml` / `AUTH_DEFAULT_SIGNUP_ROLES`. Ensure Keycloak assigns `trip:create` to travelers and `trip:join` to messengers (see [keycloak-setup-guide.md](./keycloak-setup-guide.md)).
+Default signup roles are configured in `config.yaml` / `AUTH_DEFAULT_SIGNUP_ROLES`. Ensure Keycloak assigns `trip:create` to explorers and `trip:join` to connectors (see [keycloak-setup-guide.md](./keycloak-setup-guide.md)).
 
 ---
 
 ## Endpoint reference
 
-Base path: `**/v1/travelers`**
+Base path: `**/v1/explorers`**
 
 ### GET `/profile`
 
-Return the authenticated user's traveler profile.
+Return the authenticated user's explorer profile.
 
 **Auth:** Session or Bearer  
 **Capability:** None  
-**Account mode:** `traveler`
+**Account mode:** `explorer`
 
 **Success — 200**
 
@@ -100,8 +102,15 @@ Return the authenticated user's traveler profile.
   "headline": "Flying Tokyo → NYC in March",
   "bio": "Happy to carry small items.",
   "avatar_url": null,
-  "home_country_iso": "US",
+  "home_country_id": 840,
+  "home_state_id": null,
   "home_city_id": null,
+  "custom_home_country_name": null,
+  "custom_home_state_name": null,
+  "custom_home_city_name": null,
+  "display_home_country": "United States",
+  "display_home_state": null,
+  "display_home_city": null,
   "languages": ["en", "ja"],
   "interests": ["electronics", "books"],
   "connection_availability": "open",
@@ -116,40 +125,39 @@ Return the authenticated user's traveler profile.
 | Status | When                                       |
 | ------ | ------------------------------------------ |
 | 401    | Not authenticated                          |
-| 403    | Account mode is `messenger` only           |
-| 404    | Local user or traveler profile row missing |
+| 403    | Account mode is `connector` only           |
+| 404    | Local user or explorer profile row missing |
 
 
 ---
 
 ### PUT `/profile`
 
-Create or update the traveler profile. Only fields present in the body are applied (partial update via `exclude_unset`).
+Create or update the explorer profile. Only fields present in the body are applied (partial update via `exclude_unset`).
 
 **Auth:** Session or Bearer  
 **Capability:** `trip:create`  
-**Account mode:** `traveler`
+**Account mode:** `explorer`
 
-**Request body** (`[TravelerProfileUpdateRequest](../v1/schemas/travelers.py)`)
+**Request body** (`[ExplorerProfileUpdateRequest](../v1/schemas/explorers.py)`)
 
 
-| Field                     | Type     | Constraints                                  |
-| ------------------------- | -------- | -------------------------------------------- |
-| `headline`                | string   | optional                                     |
-| `bio`                     | string   | optional                                     |
-| `avatar_url`              | string   | optional                                     |
-| `home_country_iso`        | string   | 2-letter ISO                                 |
-| `home_city_id`            | UUID     | optional                                     |
-| `languages`               | string[] | optional                                     |
-| `interests`               | string[] | optional                                     |
-| `connection_availability` | enum     | `open`, `limited`, `unavailable`             |
-| `visibility`              | enum     | `discoverable`, `connections_only`, `hidden` |
+| Field | Type | Constraints |
+| ----- | ---- | ----------- |
+| `headline`, `bio`, `avatar_url` | string | optional |
+| `home_country_id`, `home_state_id`, `home_city_id` | int | optional; mutually exclusive with matching `custom_home_*_name` |
+| `custom_home_country_name`, `custom_home_state_name`, `custom_home_city_name` | string | max 100/100/150 |
+| `languages`, `interests` | string[] | optional |
+| `connection_availability` | enum | `open`, `limited`, `unavailable` |
+| `visibility` | enum | `discoverable`, `connections_only`, `hidden` |
+
+See [profile-api.md](./profile-api.md) for location validation rules and the full request/response lifecycle.
 
 
 **Example**
 
 ```bash
-curl -X PUT "http://localhost:8000/v1/travelers/profile" \
+curl -X PUT "http://localhost:8000/v1/explorers/profile" \
   -H "Content-Type: application/json" \
   -H "Cookie: pp_session=..." \
   -H "X-CSRF-Token: ..." \
@@ -166,14 +174,14 @@ curl -X PUT "http://localhost:8000/v1/travelers/profile" \
 
 **Side effects**
 
-- Upserts `traveler_profiles` via `fn_traveler_profiles` mode 2
+- Upserts `explorer_profiles` via `fn_explorer_profiles` mode 2
 - Ensures `user_privacy_settings` row exists
 - Calls `social_rebuild_discovery_snapshot(user_id)` so search index data stays current
 
 **Logs**
 
-- `Traveler profile upsert request received`
-- `Traveler profile upsert committed`
+- `Explorer profile upsert request received`
+- `Explorer profile upsert committed`
 
 ---
 
@@ -184,7 +192,7 @@ Create a travel plan with one or more ordered destinations.
 **Auth:** Session or Bearer  
 **Capability:** `trip:create`
 
-**Request body** (`[TravelPlanCreateRequest](../v1/schemas/travelers.py)`)
+**Request body** (`[TravelPlanCreateRequest](../v1/schemas/explorers.py)`)
 
 
 | Field          | Type                | Required       |
@@ -210,7 +218,7 @@ Each destination:
 **Example**
 
 ```bash
-curl -X POST "http://localhost:8000/v1/travelers/trips" \
+curl -X POST "http://localhost:8000/v1/explorers/trips" \
   -H "Content-Type: application/json" \
   -H "Cookie: pp_session=..." \
   -H "X-CSRF-Token: ..." \
@@ -262,12 +270,12 @@ curl -X POST "http://localhost:8000/v1/travelers/trips" \
 
 ### PUT `/location`
 
-Update the traveler's current location (manual source by default).
+Update the explorer's current location (manual source by default).
 
 **Auth:** Session or Bearer  
 **Capability:** `trip:create`
 
-**Request body** (`[CurrentLocationUpdateRequest](../v1/schemas/travelers.py)`)
+**Request body** (`[CurrentLocationUpdateRequest](../v1/schemas/explorers.py)`)
 
 
 | Field         | Type                    |
@@ -281,7 +289,7 @@ Update the traveler's current location (manual source by default).
 **Example**
 
 ```bash
-curl -X PUT "http://localhost:8000/v1/travelers/location" \
+curl -X PUT "http://localhost:8000/v1/explorers/location" \
   -H "Content-Type: application/json" \
   -H "Cookie: pp_session=..." \
   -H "X-CSRF-Token: ..." \
@@ -310,14 +318,14 @@ curl -X PUT "http://localhost:8000/v1/travelers/location" \
 
 **Side effects**
 
-- Upserts `traveler_current_locations` via `fn_traveler_current_locations` mode 2
+- Upserts `explorer_current_locations` via `fn_explorer_current_locations` mode 2
 - Rebuilds discovery snapshot
 
 ---
 
 ### GET `/search`
 
-Search **discoverable** travelers by destination country. Intended for messengers browsing routes.
+Search **discoverable** explorers by destination country. Intended for connectors browsing routes.
 
 **Auth:** Session or Bearer  
 **Capability:** `trip:join`
@@ -330,7 +338,7 @@ Search **discoverable** travelers by destination country. Intended for messenger
 | `destination_country` | **Yes**  | 2-letter ISO (e.g. `JP`)                                  |
 | `q`                   | No       | Full-text query (Meilisearch only)                        |
 | `city_id`             | No       | Filter by destination city UUID                           |
-| `current_country`     | No       | 2-letter ISO — filter travelers currently in this country |
+| `current_country`     | No       | 2-letter ISO — filter explorers currently in this country |
 | `limit`               | No       | 1–50, default 20                                          |
 | `offset`              | No       | Pagination offset, default 0                              |
 
@@ -338,7 +346,7 @@ Search **discoverable** travelers by destination country. Intended for messenger
 **Example**
 
 ```bash
-curl "http://localhost:8000/v1/travelers/search?destination_country=JP&limit=20" \
+curl "http://localhost:8000/v1/explorers/search?destination_country=JP&limit=20" \
   -H "Cookie: pp_session=..."
 ```
 
@@ -371,62 +379,62 @@ curl "http://localhost:8000/v1/travelers/search?destination_country=JP&limit=20"
 
 1. Resolve viewer's local `user_id` (excluded from results).
 2. **If `MEILI_ENABLED=true` (default):**
-  - Query Meilisearch index (`MEILI_TRAVELER_INDEX`, default `travelers`) with filters:
+  - Query Meilisearch index (`MEILI_EXPLORER_INDEX`, default `explorers`) with filters:
     - `destination_country`, `visibility = discoverable`, `availability != unavailable`
     - Optional `destination_city`, `current_country`
-  - Hydrate hit IDs from `traveler_discovery_snapshots` via `fn_discovery_snapshots` mode 4.
+  - Hydrate hit IDs from `explorer_discovery_snapshots` via `fn_discovery_snapshots` mode 4.
 3. **If Meilisearch disabled:**
   - Postgres fallback via `fn_discovery_snapshots` mode 3 (same discoverability + block rules).
 4. Drop blocked pairs (`user_blocks`) and missing snapshots.
-5. Map rows to `TravelerSearchResult`.
+5. Map rows to `ExplorerSearchResult`.
 
 **Logs**
 
-- `Traveler search request received`
-- `Traveler search completed` (includes `hit_count`, `total`)
+- `Explorer search request received`
+- `Explorer search completed` (includes `hit_count`, `total`)
 
 ---
 
 ## End-to-end flows
 
-### Flow A — Traveler becomes discoverable
+### Flow A — Explorer becomes discoverable
 
 ```mermaid
 sequenceDiagram
-  participant T as Traveler client
+  participant T as Explorer client
   participant B as BFF
   participant PG as PostgreSQL
   participant M as Meilisearch
 
-  T->>B: PATCH /v1/users/account-mode (traveler)
-  T->>B: PUT /v1/travelers/profile
-  B->>PG: fn_traveler_profiles + rebuild snapshot
-  T->>B: POST /v1/travelers/trips
+  T->>B: PATCH /v1/users/account-mode (explorer)
+  T->>B: PUT /v1/explorers/profile
+  B->>PG: fn_explorer_profiles + rebuild snapshot
+  T->>B: POST /v1/explorers/trips
   B->>PG: fn_travel_plans + rebuild snapshot
   Note over PG,M: Outbox worker syncs snapshot to Meilisearch
-  T->>B: PUT /v1/travelers/location (optional)
-  B->>PG: fn_traveler_current_locations + rebuild snapshot
+  T->>B: PUT /v1/explorers/location (optional)
+  B->>PG: fn_explorer_current_locations + rebuild snapshot
 ```
 
 
 
 Minimum for search visibility:
 
-- `account_mode` = `traveler`
+- `account_mode` = `explorer`
 - Profile `visibility = discoverable` and `connection_availability != unavailable`
 - At least one active travel plan destination matching the searched country
 - Discovery snapshot rebuilt (automatic on writes above)
 
-### Flow B — Messenger finds travelers
+### Flow B — Connector finds explorers
 
 ```mermaid
 sequenceDiagram
-  participant M as Messenger client
+  participant M as Connector client
   participant B as BFF
   participant Meili as Meilisearch
   participant PG as PostgreSQL
 
-  M->>B: GET /v1/travelers/search?destination_country=JP
+  M->>B: GET /v1/explorers/search?destination_country=JP
   alt Meilisearch enabled
     B->>Meili: filtered search
     B->>PG: hydrate snapshots by user ids
@@ -439,9 +447,9 @@ sequenceDiagram
 
 
 
-Frontend: `[SearchTravelersPage](../../connect-carry/src/app/search/pages/SearchTravelersPage.tsx)` → `travelers.search()` in `[src/lib/bff.ts](../../connect-carry/src/lib/bff.ts)`.
+Frontend: `[SearchExplorersPage](../../connect-carry/src/app/search/pages/SearchExplorersPage.tsx)` → `explorers.search()` in `[src/lib/bff.ts](../../connect-carry/src/lib/bff.ts)`.
 
-Trip creation from UI: `[TripsPage](../../connect-carry/src/app/trips/pages/TripsPage.tsx)` → `travelers.createTrip()`.
+Trip creation from UI: `[TripsPage](../../connect-carry/src/app/trips/pages/TripsPage.tsx)` → `explorers.createTrip()`.
 
 ---
 
@@ -452,16 +460,16 @@ The BFF wrapper lives in `src/lib/bff.ts`:
 
 | Client method                    | HTTP                           |
 | -------------------------------- | ------------------------------ |
-| `travelers.getProfile()`         | `GET /v1/travelers/profile`    |
-| `travelers.updateProfile(data)`  | `PUT /v1/travelers/profile`    |
-| `travelers.createTrip(data)`     | `POST /v1/travelers/trips`     |
-| `travelers.updateLocation(data)` | `PUT /v1/travelers/location`   |
-| `travelers.search(params)`       | `GET /v1/travelers/search?...` |
+| `explorers.getProfile()`         | `GET /v1/explorers/profile`    |
+| `explorers.updateProfile(data)`  | `PUT /v1/explorers/profile`    |
+| `explorers.createTrip(data)`     | `POST /v1/explorers/trips`     |
+| `explorers.updateLocation(data)` | `PUT /v1/explorers/location`   |
+| `explorers.search(params)`       | `GET /v1/explorers/search?...` |
 
 
 Base URL: `VITE_BACKEND_URL` (default `http://localhost:8000`).
 
-**Note:** The API search response uses `{ hits, total, limit, offset }`. Ensure the frontend client maps `hits` correctly when integrating (see `TravelerSearchResponse` in the backend schema).
+**Note:** The API search response uses `{ hits, total, limit, offset }`. Ensure the frontend client maps `hits` correctly when integrating (see `ExplorerSearchResponse` in the backend schema).
 
 ---
 
@@ -473,7 +481,7 @@ Base URL: `VITE_BACKEND_URL` (default `http://localhost:8000`).
 | `MEILI_ENABLED`        | `true`                  | Use Meilisearch for search; `false` uses Postgres fallback |
 | `MEILI_URL`            | `http://localhost:7700` | Meilisearch host                                           |
 | `MEILI_MASTER_KEY`     | (dev key)               | API key                                                    |
-| `MEILI_TRAVELER_INDEX` | `travelers`             | Index UID                                                  |
+| `MEILI_EXPLORER_INDEX` | `explorers`             | Index UID                                                  |
 
 
 Readiness: `GET /health/ready` checks Meilisearch when enabled.
@@ -485,13 +493,13 @@ Readiness: `GET /health/ready` checks Meilisearch when enabled.
 
 | Postgres function               | Mode                          | Used by         |
 | ------------------------------- | ----------------------------- | --------------- |
-| `fn_traveler_profiles`          | 1 get, 2 upsert+rebuild       | Profile GET/PUT |
+| `fn_explorer_profiles`          | 1 get, 2 upsert+rebuild       | Profile GET/PUT |
 | `fn_travel_plans`               | 2 create+destinations+rebuild | POST `/trips`   |
-| `fn_traveler_current_locations` | 2 upsert+rebuild              | PUT `/location` |
+| `fn_explorer_current_locations` | 2 upsert+rebuild              | PUT `/location` |
 | `fn_discovery_snapshots`        | 3 search, 4 fetch by ids      | GET `/search`   |
 
 
-Key tables: `traveler_profiles`, `travel_plans`, `travel_plan_destinations`, `traveler_current_locations`, `traveler_discovery_snapshots`, `user_blocks`.
+Key tables: `explorer_profiles`, `travel_plans`, `travel_plan_destinations`, `explorer_current_locations`, `explorer_discovery_snapshots`, `user_blocks`.
 
 ---
 
@@ -501,8 +509,8 @@ Key tables: `traveler_profiles`, `travel_plans`, `travel_plan_destinations`, `tr
 | HTTP | Typical cause                                                                    |
 | ---- | -------------------------------------------------------------------------------- |
 | 401  | Missing/invalid session or Bearer token                                          |
-| 403  | Missing `trip:create` / `trip:join`, or messenger-only account on profile routes |
-| 404  | No local `users` row, or traveler profile not created yet on GET                 |
+| 403  | Missing `trip:create` / `trip:join`, or connector-only account on profile routes |
+| 404  | No local `users` row, or explorer profile not created yet on GET                 |
 | 422  | Validation error (invalid ISO length, empty destinations array, etc.)            |
 
 
@@ -512,10 +520,10 @@ Key tables: `traveler_profiles`, `travel_plans`, `travel_plan_destinations`, `tr
 
 1. Start stack: Postgres, Redis, Keycloak, Meilisearch (see root [README.md](../README.md)).
 2. Run migrations: `uv run python scripts/run_migrations.py`
-3. Sign up / sign in as a **traveler**.
+3. Sign up / sign in as a **explorer**.
 4. `PUT /profile` → `POST /trips` with `destinations[].country_iso`.
-5. Sign in as a **messenger** with `trip:join`.
-6. `GET /search?destination_country=<ISO>` — confirm traveler appears (may require outbox sync if Meilisearch lagging).
+5. Sign in as a **connector** with `trip:join`.
+6. `GET /search?destination_country=<ISO>` — confirm explorer appears (may require outbox sync if Meilisearch lagging).
 7. Confirm blocked users and `visibility: hidden` profiles do not appear.
 
 ---

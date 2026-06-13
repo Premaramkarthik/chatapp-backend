@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 
 
 class ConnectionRequestCreate(BaseModel):
-    """Create a connection request to a traveler."""
+    """Create a connection request to an explorer."""
 
     recipient_id: UUID
     message: str | None = Field(None, max_length=500)

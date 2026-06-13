@@ -6,7 +6,7 @@ import pytest
 from pydantic import ValidationError
 
 from domains.geo.location_payload import LocationFields, normalize_home_location_payload
-from v1.schemas.travelers import CurrentLocationUpdateRequest, TravelPlanDestinationInput
+from v1.schemas.explorers import CurrentLocationUpdateRequest, TravelPlanDestinationInput
 
 
 def test_mutual_exclusion_city_id_vs_custom() -> None:

@@ -15,11 +15,11 @@ from infrastructure.database.jsonb_helpers import (
     row_from_jsonb,
 )
 from infrastructure.database.repositories.matching import PostgresMatchingRepository
-from infrastructure.meilisearch.traveler_documents import (
+from infrastructure.meilisearch.explorer_documents import (
     should_index_snapshot,
     snapshot_to_meili_document,
 )
-from infrastructure.meilisearch.traveler_search import TravelerSearchQuery, build_filter
+from infrastructure.meilisearch.explorer_search import ExplorerSearchQuery, build_filter
 
 
 def test_row_from_jsonb_none_and_dict() -> None:
@@ -138,7 +138,7 @@ def test_snapshot_custom_city_name_in_search_text() -> None:
 
 
 def test_build_filter_destination_and_current_country() -> None:
-    query = TravelerSearchQuery(
+    query = ExplorerSearchQuery(
         destination_country="us",
         current_country="gb",
         city_id="101",

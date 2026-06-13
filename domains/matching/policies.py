@@ -1,4 +1,4 @@
-"""Locked product rules for traveler discovery and connections (v1)."""
+"""Locked product rules for explorer discovery and connections (v1)."""
 
 from __future__ import annotations
 

@@ -10,8 +10,8 @@ from enum import StrEnum
 class AccountMode(StrEnum):
     """Business profile mode for app behavior, not a Keycloak security role."""
 
-    TRAVELER = "traveler"
-    MESSENGER = "messenger"
+    EXPLORER = "explorer"
+    CONNECTOR = "connector"
 
 
 class UserStatus(StrEnum):

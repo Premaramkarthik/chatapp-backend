@@ -1,4 +1,4 @@
-"""Traveler and messenger profile repositories."""
+"""Explorer and connector profile repositories."""
 
 from __future__ import annotations
 
@@ -8,15 +8,15 @@ from infrastructure.database.connection import call_json_function
 from infrastructure.database.jsonb_helpers import row_from_jsonb
 
 
-class PostgresTravelerRepository:
-    """Postgres access for traveler and messenger profiles."""
+class PostgresExplorerRepository:
+    """Postgres access for explorer and connector profiles."""
 
-    async def get_traveler_profile(self, user_id: str) -> dict[str, Any] | None:
-        """Return traveler profile row."""
-        result = await call_json_function("fn_traveler_profiles", 1, {"user_id": user_id})
+    async def get_explorer_profile(self, user_id: str) -> dict[str, Any] | None:
+        """Return explorer profile row."""
+        result = await call_json_function("fn_explorer_profiles", 1, {"user_id": user_id})
         return row_from_jsonb(result)
 
-    async def upsert_traveler_profile(
+    async def upsert_explorer_profile(
         self,
         user_id: str,
         *,
@@ -34,7 +34,7 @@ class PostgresTravelerRepository:
         connection_availability: str | None = None,
         visibility: str | None = None,
     ) -> dict[str, Any]:
-        """Create or update a traveler profile."""
+        """Create or update an explorer profile."""
         payload: dict[str, Any] = {"user_id": user_id}
         field_map = {
             "headline": headline,
@@ -55,10 +55,10 @@ class PostgresTravelerRepository:
             if value is not None:
                 payload[key] = value
 
-        result = await call_json_function("fn_traveler_profiles", 2, payload)
+        result = await call_json_function("fn_explorer_profiles", 2, payload)
         row = row_from_jsonb(result)
         if row is None:
-            raise RuntimeError("fn_traveler_profiles mode 2 returned no row")
+            raise RuntimeError("fn_explorer_profiles mode 2 returned no row")
         return row
 
     async def upsert_privacy_settings(
@@ -71,7 +71,7 @@ class PostgresTravelerRepository:
         result = await call_json_function("fn_user_privacy_settings", 2, payload)
         return row_from_jsonb(result) or {}
 
-    async def upsert_messenger_profile(
+    async def upsert_connector_profile(
         self,
         user_id: str,
         *,
@@ -90,7 +90,7 @@ class PostgresTravelerRepository:
         custom_last_search_city_name: str | None = None,
         bio: str | None = None,
     ) -> dict[str, Any]:
-        """Create or update messenger profile (search preferences)."""
+        """Create or update connector profile (search preferences)."""
         payload: dict[str, Any] = {"user_id": user_id}
         field_map = {
             "home_country_id": home_country_id,
@@ -112,8 +112,8 @@ class PostgresTravelerRepository:
             if value is not None:
                 payload[key] = value
 
-        result = await call_json_function("fn_messenger_profiles", 2, payload)
+        result = await call_json_function("fn_connector_profiles", 2, payload)
         row = row_from_jsonb(result)
         if row is None:
-            raise RuntimeError("fn_messenger_profiles mode 2 returned no row")
+            raise RuntimeError("fn_connector_profiles mode 2 returned no row")
         return row

@@ -59,5 +59,5 @@ def snapshot_to_meili_document(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def should_index_snapshot(row: dict[str, Any]) -> bool:
-    """Return True when the traveler should appear in Meilisearch."""
+    """Return True when the explorer should appear in Meilisearch."""
     return bool(row.get("is_discoverable")) and row.get("visibility") == "discoverable"

@@ -29,7 +29,7 @@ class UserResponse(BaseModel):
 class AccountModeUpdateRequest(BaseModel):
     """Request body for changing business account mode."""
 
-    account_mode: Literal["traveler", "messenger"] = Field(
+    account_mode: Literal["explorer", "connector"] = Field(
         ...,
         description="Business account mode. This is app state, not a Keycloak role.",
     )

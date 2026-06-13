@@ -19,7 +19,7 @@ Consolidation reduced **15 migration files → 7**, with **one authoritative def
 | `003_create_auth_tables.sql` | auth tables, `account_mode`, `fn_users` v2 | replaces `fn_users`, drops/recreates `users_account_mode_check` |
 | `004_create_signup_lifecycle.sql` | signup columns, `fn_signup_sessions`, `fn_users` v3 | alters `users`, drops `idx_users_email`, replaces `users_status_check`, `fn_users` v3 |
 | `005_geo_reference.sql` | geo tables, seeds, `pg_trgm` | extension split from pgcrypto |
-| `006_traveler_messenger_profiles.sql` | profile tables, triggers | — |
+| `006_explorer_connector_profiles.sql` | profile tables, triggers | — |
 | `007_travel_plans.sql` | travel tables, triggers | — |
 | `008_discovery_connections.sql` | social tables, triggers | — |
 | `009_tinode_conversations.sql` | `tinode_conversation_mappings` | — |
@@ -54,8 +54,8 @@ All `updated_at` triggers used idempotent `DROP TRIGGER IF EXISTS` + `CREATE TRI
 | `trg_tinode_user_mappings_set_updated_at` | 002 | `006_triggers.sql` |
 | `trg_auth_sessions_set_updated_at` | 003 | `006_triggers.sql` |
 | `trg_auth_device_fingerprints_set_updated_at` | 003 | `006_triggers.sql` |
-| `trg_traveler_profiles_set_updated_at` | 006 | `006_triggers.sql` |
-| `trg_messenger_profiles_set_updated_at` | 006 | `006_triggers.sql` |
+| `trg_explorer_profiles_set_updated_at` | 006 | `006_triggers.sql` |
+| `trg_connector_profiles_set_updated_at` | 006 | `006_triggers.sql` |
 | `trg_user_privacy_settings_set_updated_at` | 006 | `006_triggers.sql` |
 | `trg_travel_plans_set_updated_at` | 007 | `006_triggers.sql` |
 | `trg_connection_requests_set_updated_at` | 008 | `006_triggers.sql` |
@@ -95,7 +95,7 @@ All 15 legacy files were removed; see [consolidation-plan.md](./consolidation-pl
 
 | Object | Used by application? | Notes |
 |--------|----------------------|-------|
-| `traveler_profiles.onboarding_step` | No direct Python reference | Kept — column exists in domain schema path |
+| `explorer_profiles.onboarding_step` | No direct Python reference | Kept — column exists in domain schema path |
 | `auth_outbox_events` | Yes (`auth.py` repository) | Active |
 | `idx_users_email` (legacy) | **Removed** | Replaced by `idx_users_email_unique` |
 | `fn_users` mode 4 | No repository call | Kept — general update API, harmless |
@@ -111,11 +111,11 @@ No tables were removed; all 23 application tables remain.
 | `fn_signup_sessions` | 1,2,3 | `003_functions_core.sql` |
 | `fn_tinode_user_mappings` | 2,3 | `003_functions_core.sql` |
 | `fn_health` | 1 | `003_functions_core.sql` |
-| `fn_traveler_profiles` | 1,2 | `004_functions_social.sql` |
-| `fn_messenger_profiles` | 2 | `004_functions_social.sql` |
+| `fn_explorer_profiles` | 1,2 | `004_functions_social.sql` |
+| `fn_connector_profiles` | 2 | `004_functions_social.sql` |
 | `fn_user_privacy_settings` | 2 | `004_functions_social.sql` |
 | `fn_travel_plans` | 1,2 | `004_functions_social.sql` |
-| `fn_traveler_current_locations` | 2 | `004_functions_social.sql` |
+| `fn_explorer_current_locations` | 2 | `004_functions_social.sql` |
 | `fn_discovery_snapshots` | 1,2,3,4 | `004_functions_social.sql` |
 | `fn_connection_requests` | 1–5 | `004_functions_social.sql` |
 | `fn_user_connections` | 1,2 | `004_functions_social.sql` |

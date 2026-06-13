@@ -53,7 +53,7 @@ class FakeAuthService:
             email=email,
             display_name="Test User",
             status="active",
-            account_mode="traveler",
+            account_mode="explorer",
             email_verified=True,
             created_at=now,
             updated_at=now,
@@ -253,7 +253,7 @@ def test_signup_is_deprecated() -> None:
             json={
                 "email": "user@example.com",
                 "display_name": "User Example",
-                "account_mode": "traveler",
+                "account_mode": "explorer",
                 "device_fingerprint": "device-12345",
             },
         )
@@ -355,7 +355,7 @@ def test_signup_complete_returns_verify_email_step() -> None:
                 json={
                     "signup_token": "signup-token-abc",
                     "display_name": "User Example",
-                    "account_mode": "traveler",
+                    "account_mode": "explorer",
                 },
             )
     finally:
@@ -373,7 +373,7 @@ def test_social_signup_start_returns_idp_authorization_url() -> None:
                 "/v1/auth/signup/social/start",
                 json={
                     "identity_provider": "google",
-                    "account_mode": "messenger",
+                    "account_mode": "connector",
                     "device_fingerprint": "device-12345",
                 },
             )

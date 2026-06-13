@@ -32,7 +32,7 @@ BEGIN
         scheduled_at
     )
     VALUES (
-        'traveler_discovery_snapshot',
+        'explorer_discovery_snapshot',
         p_user_id,
         p_event_type,
         jsonb_build_object('user_id', p_user_id::text),
@@ -54,7 +54,7 @@ DECLARE
     avail TEXT;
     vis TEXT;
     is_disc BOOLEAN;
-    snap traveler_discovery_snapshots%ROWTYPE;
+    snap explorer_discovery_snapshots%ROWTYPE;
     out_event TEXT;
 BEGIN
     SELECT
@@ -87,10 +87,10 @@ BEGIN
         NULL::numeric AS dest_lng
     INTO ctx
     FROM users u
-    LEFT JOIN traveler_profiles tp ON tp.user_id = u.id
+    LEFT JOIN explorer_profiles tp ON tp.user_id = u.id
     LEFT JOIN geo_countries gc_home ON gc_home.id = tp.home_country_id
     LEFT JOIN user_privacy_settings ups ON ups.user_id = u.id
-    LEFT JOIN traveler_current_locations tcl ON tcl.user_id = u.id
+    LEFT JOIN explorer_current_locations tcl ON tcl.user_id = u.id
     LEFT JOIN geo_cities gc_cur ON gc_cur.id = tcl.city_id
     LEFT JOIN geo_countries gc_cur_ctry ON gc_cur_ctry.id = tcl.country_id
     LEFT JOIN LATERAL (
@@ -116,8 +116,8 @@ BEGIN
     END IF;
 
     IF ctx.connection_availability IS NULL
-       OR ctx.account_mode <> 'traveler' THEN
-        DELETE FROM traveler_discovery_snapshots WHERE user_id = p_user_id;
+       OR ctx.account_mode <> 'explorer' THEN
+        DELETE FROM explorer_discovery_snapshots WHERE user_id = p_user_id;
         PERFORM social_enqueue_search_outbox(p_user_id, 'delete');
         RETURN NULL;
     END IF;
@@ -126,7 +126,7 @@ BEGIN
     IF dest_country IS NULL
        AND ctx.destination_city_name IS NULL
        AND ctx.destination_city_id IS NULL THEN
-        DELETE FROM traveler_discovery_snapshots WHERE user_id = p_user_id;
+        DELETE FROM explorer_discovery_snapshots WHERE user_id = p_user_id;
         PERFORM social_enqueue_search_outbox(p_user_id, 'delete');
         RETURN NULL;
     END IF;
@@ -143,7 +143,7 @@ BEGIN
     geo_lat := COALESCE(ctx.dest_lat, ctx.current_lat);
     geo_lng := COALESCE(ctx.dest_lng, ctx.current_lng);
 
-    INSERT INTO traveler_discovery_snapshots (
+    INSERT INTO explorer_discovery_snapshots (
         user_id,
         display_name,
         headline,
@@ -191,7 +191,7 @@ BEGIN
         is_disc,
         ctx.last_active_at,
         COALESCE(
-            (SELECT snapshot_version + 1 FROM traveler_discovery_snapshots WHERE user_id = p_user_id),
+            (SELECT snapshot_version + 1 FROM explorer_discovery_snapshots WHERE user_id = p_user_id),
             1
         ),
         now()
@@ -217,7 +217,7 @@ BEGIN
         visibility = EXCLUDED.visibility,
         is_discoverable = EXCLUDED.is_discoverable,
         last_active_at = EXCLUDED.last_active_at,
-        snapshot_version = traveler_discovery_snapshots.snapshot_version + 1,
+        snapshot_version = explorer_discovery_snapshots.snapshot_version + 1,
         updated_at = now()
     RETURNING * INTO snap;
 
@@ -253,19 +253,19 @@ BEGIN
 END;
 $$;
 
--- fn_traveler_profiles: 1=get, 2=upsert+rebuild
-CREATE OR REPLACE FUNCTION fn_traveler_profiles(mode INT, payload JSONB DEFAULT '{}'::jsonb)
+-- fn_explorer_profiles: 1=get, 2=upsert+rebuild
+CREATE OR REPLACE FUNCTION fn_explorer_profiles(mode INT, payload JSONB DEFAULT '{}'::jsonb)
 RETURNS JSONB
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    result traveler_profiles%ROWTYPE;
+    result explorer_profiles%ROWTYPE;
     uid UUID;
 BEGIN
     uid := (payload->>'user_id')::uuid;
 
     IF mode = 1 THEN
-        SELECT * INTO result FROM traveler_profiles WHERE user_id = uid;
+        SELECT * INTO result FROM explorer_profiles WHERE user_id = uid;
         RETURN CASE WHEN result.user_id IS NULL THEN NULL ELSE to_jsonb(result) END;
 
     ELSIF mode = 2 THEN
@@ -273,7 +273,7 @@ BEGIN
         VALUES (uid)
         ON CONFLICT (user_id) DO NOTHING;
 
-        INSERT INTO traveler_profiles (
+        INSERT INTO explorer_profiles (
             user_id,
             headline,
             bio,
@@ -316,53 +316,53 @@ BEGIN
             now()
         )
         ON CONFLICT (user_id) DO UPDATE SET
-            headline = COALESCE(NULLIF(payload->>'headline', ''), traveler_profiles.headline),
-            bio = COALESCE(NULLIF(payload->>'bio', ''), traveler_profiles.bio),
-            avatar_url = COALESCE(NULLIF(payload->>'avatar_url', ''), traveler_profiles.avatar_url),
+            headline = COALESCE(NULLIF(payload->>'headline', ''), explorer_profiles.headline),
+            bio = COALESCE(NULLIF(payload->>'bio', ''), explorer_profiles.bio),
+            avatar_url = COALESCE(NULLIF(payload->>'avatar_url', ''), explorer_profiles.avatar_url),
             home_country_id = CASE
                 WHEN payload ? 'home_country_id' THEN NULLIF(payload->>'home_country_id', '')::bigint
-                ELSE traveler_profiles.home_country_id
+                ELSE explorer_profiles.home_country_id
             END,
             home_state_id = CASE
                 WHEN payload ? 'home_state_id' THEN NULLIF(payload->>'home_state_id', '')::bigint
-                ELSE traveler_profiles.home_state_id
+                ELSE explorer_profiles.home_state_id
             END,
             home_city_id = CASE
                 WHEN payload ? 'home_city_id' THEN NULLIF(payload->>'home_city_id', '')::bigint
-                ELSE traveler_profiles.home_city_id
+                ELSE explorer_profiles.home_city_id
             END,
             custom_home_country_name = CASE
                 WHEN payload ? 'custom_home_country_name'
                 THEN NULLIF(payload->>'custom_home_country_name', '')
-                ELSE traveler_profiles.custom_home_country_name
+                ELSE explorer_profiles.custom_home_country_name
             END,
             custom_home_state_name = CASE
                 WHEN payload ? 'custom_home_state_name'
                 THEN NULLIF(payload->>'custom_home_state_name', '')
-                ELSE traveler_profiles.custom_home_state_name
+                ELSE explorer_profiles.custom_home_state_name
             END,
             custom_home_city_name = CASE
                 WHEN payload ? 'custom_home_city_name'
                 THEN NULLIF(payload->>'custom_home_city_name', '')
-                ELSE traveler_profiles.custom_home_city_name
+                ELSE explorer_profiles.custom_home_city_name
             END,
             languages = CASE
                 WHEN payload ? 'languages' THEN
                     ARRAY(SELECT jsonb_array_elements_text(payload->'languages'))
-                ELSE traveler_profiles.languages
+                ELSE explorer_profiles.languages
             END,
             interests = CASE
                 WHEN payload ? 'interests' THEN
                     ARRAY(SELECT jsonb_array_elements_text(payload->'interests'))
-                ELSE traveler_profiles.interests
+                ELSE explorer_profiles.interests
             END,
             connection_availability = COALESCE(
                 NULLIF(payload->>'connection_availability', ''),
-                traveler_profiles.connection_availability
+                explorer_profiles.connection_availability
             ),
             visibility = COALESCE(
                 NULLIF(payload->>'visibility', ''),
-                traveler_profiles.visibility
+                explorer_profiles.visibility
             ),
             last_active_at = now(),
             updated_at = now()
@@ -372,24 +372,24 @@ BEGIN
         RETURN to_jsonb(result);
     END IF;
 
-    RAISE EXCEPTION 'fn_traveler_profiles unknown mode: %', mode;
+    RAISE EXCEPTION 'fn_explorer_profiles unknown mode: %', mode;
 END;
 $$;
 
--- fn_messenger_profiles: 1=get, 2=upsert
-CREATE OR REPLACE FUNCTION fn_messenger_profiles(mode INT, payload JSONB DEFAULT '{}'::jsonb)
+-- fn_connector_profiles: 1=get, 2=upsert
+CREATE OR REPLACE FUNCTION fn_connector_profiles(mode INT, payload JSONB DEFAULT '{}'::jsonb)
 RETURNS JSONB
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    result messenger_profiles%ROWTYPE;
+    result connector_profiles%ROWTYPE;
     uid UUID;
     dest_countries CHAR(2)[];
 BEGIN
     uid := (payload->>'user_id')::uuid;
 
     IF mode = 1 THEN
-        SELECT * INTO result FROM messenger_profiles WHERE user_id = uid;
+        SELECT * INTO result FROM connector_profiles WHERE user_id = uid;
         RETURN CASE WHEN result.user_id IS NULL THEN NULL ELSE to_jsonb(result) END;
 
     ELSIF mode = 2 THEN
@@ -402,7 +402,7 @@ BEGIN
             dest_countries := NULL;
         END IF;
 
-        INSERT INTO messenger_profiles (
+        INSERT INTO connector_profiles (
             user_id,
             home_country_id,
             home_state_id,
@@ -439,64 +439,64 @@ BEGIN
         ON CONFLICT (user_id) DO UPDATE SET
             home_country_id = COALESCE(
                 NULLIF(payload->>'home_country_id', '')::bigint,
-                messenger_profiles.home_country_id
+                connector_profiles.home_country_id
             ),
             home_state_id = COALESCE(
                 NULLIF(payload->>'home_state_id', '')::bigint,
-                messenger_profiles.home_state_id
+                connector_profiles.home_state_id
             ),
             home_city_id = COALESCE(
                 NULLIF(payload->>'home_city_id', '')::bigint,
-                messenger_profiles.home_city_id
+                connector_profiles.home_city_id
             ),
             custom_home_country_name = COALESCE(
                 NULLIF(payload->>'custom_home_country_name', ''),
-                messenger_profiles.custom_home_country_name
+                connector_profiles.custom_home_country_name
             ),
             custom_home_state_name = COALESCE(
                 NULLIF(payload->>'custom_home_state_name', ''),
-                messenger_profiles.custom_home_state_name
+                connector_profiles.custom_home_state_name
             ),
             custom_home_city_name = COALESCE(
                 NULLIF(payload->>'custom_home_city_name', ''),
-                messenger_profiles.custom_home_city_name
+                connector_profiles.custom_home_city_name
             ),
             preferred_destination_countries = COALESCE(
                 dest_countries,
-                messenger_profiles.preferred_destination_countries
+                connector_profiles.preferred_destination_countries
             ),
             last_search_country_id = COALESCE(
                 NULLIF(payload->>'last_search_country_id', '')::bigint,
-                messenger_profiles.last_search_country_id
+                connector_profiles.last_search_country_id
             ),
             last_search_state_id = COALESCE(
                 NULLIF(payload->>'last_search_state_id', '')::bigint,
-                messenger_profiles.last_search_state_id
+                connector_profiles.last_search_state_id
             ),
             last_search_city_id = COALESCE(
                 NULLIF(payload->>'last_search_city_id', '')::bigint,
-                messenger_profiles.last_search_city_id
+                connector_profiles.last_search_city_id
             ),
             custom_last_search_country_name = COALESCE(
                 NULLIF(payload->>'custom_last_search_country_name', ''),
-                messenger_profiles.custom_last_search_country_name
+                connector_profiles.custom_last_search_country_name
             ),
             custom_last_search_state_name = COALESCE(
                 NULLIF(payload->>'custom_last_search_state_name', ''),
-                messenger_profiles.custom_last_search_state_name
+                connector_profiles.custom_last_search_state_name
             ),
             custom_last_search_city_name = COALESCE(
                 NULLIF(payload->>'custom_last_search_city_name', ''),
-                messenger_profiles.custom_last_search_city_name
+                connector_profiles.custom_last_search_city_name
             ),
-            bio = COALESCE(NULLIF(payload->>'bio', ''), messenger_profiles.bio),
+            bio = COALESCE(NULLIF(payload->>'bio', ''), connector_profiles.bio),
             updated_at = now()
         RETURNING * INTO result;
 
         RETURN to_jsonb(result);
     END IF;
 
-    RAISE EXCEPTION 'fn_messenger_profiles unknown mode: %', mode;
+    RAISE EXCEPTION 'fn_connector_profiles unknown mode: %', mode;
 END;
 $$;
 
@@ -640,23 +640,23 @@ BEGIN
 END;
 $$;
 
--- fn_traveler_current_locations: 1=get, 2=upsert+rebuild
-CREATE OR REPLACE FUNCTION fn_traveler_current_locations(mode INT, payload JSONB DEFAULT '{}'::jsonb)
+-- fn_explorer_current_locations: 1=get, 2=upsert+rebuild
+CREATE OR REPLACE FUNCTION fn_explorer_current_locations(mode INT, payload JSONB DEFAULT '{}'::jsonb)
 RETURNS JSONB
 LANGUAGE plpgsql
 AS $$
 DECLARE
-    result traveler_current_locations%ROWTYPE;
+    result explorer_current_locations%ROWTYPE;
     uid UUID;
 BEGIN
     uid := (payload->>'user_id')::uuid;
 
     IF mode = 1 THEN
-        SELECT * INTO result FROM traveler_current_locations WHERE user_id = uid;
+        SELECT * INTO result FROM explorer_current_locations WHERE user_id = uid;
         RETURN CASE WHEN result.user_id IS NULL THEN NULL ELSE to_jsonb(result) END;
 
     ELSIF mode = 2 THEN
-        INSERT INTO traveler_current_locations (
+        INSERT INTO explorer_current_locations (
             user_id,
             country_id,
             state_id,
@@ -699,7 +699,7 @@ BEGIN
         RETURN to_jsonb(result);
     END IF;
 
-    RAISE EXCEPTION 'fn_traveler_current_locations unknown mode: %', mode;
+    RAISE EXCEPTION 'fn_explorer_current_locations unknown mode: %', mode;
 END;
 $$;
 
@@ -710,7 +710,7 @@ LANGUAGE plpgsql
 AS $$
 DECLARE
     uid UUID;
-    snap traveler_discovery_snapshots%ROWTYPE;
+    snap explorer_discovery_snapshots%ROWTYPE;
     arr JSONB;
     dest_country CHAR(2);
     cur_country CHAR(2);
@@ -724,7 +724,7 @@ BEGIN
 
     ELSIF mode = 2 THEN
         uid := (payload->>'user_id')::uuid;
-        SELECT * INTO snap FROM traveler_discovery_snapshots WHERE user_id = uid;
+        SELECT * INTO snap FROM explorer_discovery_snapshots WHERE user_id = uid;
         RETURN CASE WHEN snap.user_id IS NULL THEN NULL ELSE to_jsonb(snap) END;
 
     ELSIF mode = 3 THEN
@@ -738,7 +738,7 @@ BEGIN
         INTO arr
         FROM (
             SELECT s.*
-            FROM traveler_discovery_snapshots s
+            FROM explorer_discovery_snapshots s
             WHERE s.is_discoverable = true
               AND s.destination_country_iso = dest_country
               AND (cur_country IS NULL OR s.current_country_iso = cur_country)
@@ -756,7 +756,7 @@ BEGIN
     ELSIF mode = 4 THEN
         SELECT COALESCE(jsonb_agg(to_jsonb(s)), '[]'::jsonb)
         INTO arr
-        FROM traveler_discovery_snapshots s
+        FROM explorer_discovery_snapshots s
         WHERE s.user_id = ANY(
             ARRAY(SELECT (elem::text)::uuid FROM jsonb_array_elements_text(payload->'user_ids') elem)
         )

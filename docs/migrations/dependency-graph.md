@@ -12,7 +12,7 @@ Consolidated migration order and object dependencies for the chatapp PostgreSQL 
 003_functions_core.sql
     └── set_updated_at, fn_health, fn_tinode_user_mappings, fn_signup_sessions, fn_users
 004_functions_social.sql
-    └── social_* helpers, fn_traveler_*, fn_discovery_*, fn_connection_*, fn_search_outbox_events
+    └── social_* helpers, fn_explorer_*, fn_discovery_*, fn_connection_*, fn_search_outbox_events
 005_functions_chat.sql
     └── fn_tinode_conversation_mappings (depends on user_connections, user_blocks, users, tinode_user_mappings)
 006_triggers.sql
@@ -51,16 +51,16 @@ flowchart TB
     end
 
     subgraph L5["002 Tables — Profiles & Travel"]
-        tp[traveler_profiles]
-        mp[messenger_profiles]
+        tp[explorer_profiles]
+        mp[connector_profiles]
         privacy[user_privacy_settings]
         plans[travel_plans]
         dests[travel_plan_destinations]
-        loc[traveler_current_locations]
+        loc[explorer_current_locations]
     end
 
     subgraph L6["002 Tables — Social & Chat"]
-        snap[traveler_discovery_snapshots]
+        snap[explorer_discovery_snapshots]
         conn_req[connection_requests]
         conn[user_connections]
         blocks[user_blocks]
@@ -149,13 +149,13 @@ flowchart TB
 | `auth_outbox_events` | — |
 | `signup_sessions` | `users` |
 | `geo_cities` | `geo_countries` |
-| `traveler_profiles` | `users`, `geo_countries`, `geo_cities` |
-| `messenger_profiles` | `users`, `geo_countries`, `geo_cities` |
+| `explorer_profiles` | `users`, `geo_countries`, `geo_cities` |
+| `connector_profiles` | `users`, `geo_countries`, `geo_cities` |
 | `user_privacy_settings` | `users` |
 | `travel_plans` | `users` |
 | `travel_plan_destinations` | `travel_plans`, `geo_countries`, `geo_cities` |
-| `traveler_current_locations` | `users`, `geo_countries`, `geo_cities` |
-| `traveler_discovery_snapshots` | `users` |
+| `explorer_current_locations` | `users`, `geo_countries`, `geo_cities` |
+| `explorer_discovery_snapshots` | `users` |
 | `connection_requests` | `users` ×2 |
 | `user_connections` | `users` ×2, `connection_requests` (nullable) |
 | `user_blocks` | `users` ×2 |
@@ -173,14 +173,14 @@ flowchart TB
 | `fn_signup_sessions` | `signup_sessions` |
 | `social_ordered_pair` | — |
 | `social_enqueue_search_outbox` | `search_outbox_events` |
-| `social_rebuild_discovery_snapshot` | `users`, profiles, privacy, locations, plans, `traveler_discovery_snapshots`, outbox |
+| `social_rebuild_discovery_snapshot` | `users`, profiles, privacy, locations, plans, `explorer_discovery_snapshots`, outbox |
 | `social_expire_connection_request` | `connection_requests` |
-| `fn_traveler_profiles` | `traveler_profiles`, `user_privacy_settings` + rebuild |
-| `fn_messenger_profiles` | `messenger_profiles` |
+| `fn_explorer_profiles` | `explorer_profiles`, `user_privacy_settings` + rebuild |
+| `fn_connector_profiles` | `connector_profiles` |
 | `fn_user_privacy_settings` | `user_privacy_settings` + rebuild |
 | `fn_travel_plans` | `travel_plans`, `travel_plan_destinations` + rebuild |
-| `fn_traveler_current_locations` | `traveler_current_locations` + rebuild |
-| `fn_discovery_snapshots` | `traveler_discovery_snapshots`, `user_blocks` |
+| `fn_explorer_current_locations` | `explorer_current_locations` + rebuild |
+| `fn_discovery_snapshots` | `explorer_discovery_snapshots`, `user_blocks` |
 | `fn_connection_requests` | `connection_requests`, `user_connections`, `user_blocks` |
 | `fn_user_connections` | `user_connections` |
 | `fn_user_blocks` | `user_blocks` |

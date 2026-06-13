@@ -1,10 +1,10 @@
-"""Travelers index settings — must match filter/sort usage in search."""
+"""Explorers index settings — must match filter/sort usage in search."""
 
 from __future__ import annotations
 
 from meilisearch import Client
 
-TRAVELER_FILTERABLE = [
+EXPLORER_FILTERABLE = [
     "destination_country",
     "current_country",
     "destination_city",
@@ -15,14 +15,14 @@ TRAVELER_FILTERABLE = [
     "_geo",
 ]
 
-TRAVELER_SORTABLE = [
+EXPLORER_SORTABLE = [
     "last_active_at",
     "trip_starts_at",
     "trip_ends_at",
     "_geo",
 ]
 
-TRAVELER_SEARCHABLE = [
+EXPLORER_SEARCHABLE = [
     "display_name",
     "headline",
     "search_text",
@@ -30,9 +30,9 @@ TRAVELER_SEARCHABLE = [
 ]
 
 
-def ensure_traveler_index_settings(client: Client, index_uid: str) -> None:
+def ensure_explorer_index_settings(client: Client, index_uid: str) -> None:
     """Apply index settings; triggers re-index when filterable/sortable change."""
     index = client.index(index_uid)
-    index.update_filterable_attributes(TRAVELER_FILTERABLE)
-    index.update_sortable_attributes(TRAVELER_SORTABLE)
-    index.update_searchable_attributes(TRAVELER_SEARCHABLE)
+    index.update_filterable_attributes(EXPLORER_FILTERABLE)
+    index.update_sortable_attributes(EXPLORER_SORTABLE)
+    index.update_searchable_attributes(EXPLORER_SEARCHABLE)

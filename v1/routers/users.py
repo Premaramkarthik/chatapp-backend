@@ -9,6 +9,7 @@ from domains.auth import AuthService
 from domains.users.bootstrap import BootstrapUser
 from domains.users.user import BootstrapUserCommand
 from infrastructure.database.repositories import PostgresUserRepository
+from infrastructure.database.repositories.explorers import PostgresExplorerRepository
 from v1.dependencies.auth import get_current_principal, require_capability
 from v1.dependencies.container import get_auth_service, get_bootstrap_user_use_case
 from v1.schemas.principal import KeycloakPrincipal
@@ -45,6 +46,10 @@ async def update_account_mode(
         keycloak_sub=principal.sub,
         account_mode=payload.account_mode,
     )
+    if payload.account_mode == "explorer":
+        await PostgresExplorerRepository().upsert_explorer_profile(user.id)
+    elif payload.account_mode == "connector":
+        await PostgresExplorerRepository().upsert_connector_profile(user.id)
     log_info(
         logger,
         "User account mode updated",

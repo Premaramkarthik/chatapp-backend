@@ -61,7 +61,7 @@ class PostgresTripRepository:
         longitude: float | None,
         source: str = "manual",
     ) -> dict[str, Any]:
-        """Update traveler current location."""
+        """Update explorer current location."""
         payload: dict[str, Any] = {
             "user_id": user_id,
             "country_id": country_id,
@@ -74,8 +74,8 @@ class PostgresTripRepository:
             "longitude": longitude,
             "source": source,
         }
-        result = await call_json_function("fn_traveler_current_locations", 2, payload)
+        result = await call_json_function("fn_explorer_current_locations", 2, payload)
         row = row_from_jsonb(result)
         if row is None:
-            raise RuntimeError("fn_traveler_current_locations mode 2 returned no row")
+            raise RuntimeError("fn_explorer_current_locations mode 2 returned no row")
         return row

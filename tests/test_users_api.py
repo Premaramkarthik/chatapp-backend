@@ -96,6 +96,13 @@ def test_update_account_mode_without_profile_capability(
                 updated_at=now,
             )
 
+    class FakeExplorerRepository:
+        async def upsert_explorer_profile(self, user_id: str, **_: object) -> dict:
+            return {"user_id": user_id}
+
+        async def upsert_connector_profile(self, user_id: str, **_: object) -> dict:
+            return {"user_id": user_id}
+
     monkeypatch.setattr(
         "v1.middleware.authentication.settings.middleware.auth_enabled",
         False,
@@ -111,18 +118,19 @@ def test_update_account_mode_without_profile_capability(
     )
     app.dependency_overrides[get_bootstrap_user_use_case] = lambda: FakeBootstrapUser()
     monkeypatch.setattr("v1.routers.users.PostgresUserRepository", FakeUserRepository)
+    monkeypatch.setattr("v1.routers.users.PostgresExplorerRepository", FakeExplorerRepository)
     try:
         with TestClient(app) as client:
             response = client.patch(
                 "/v1/users/account-mode",
-                json={"account_mode": "messenger"},
+                json={"account_mode": "connector"},
             )
     finally:
         app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert updated_mode == "messenger"
-    assert response.json()["account_mode"] == "messenger"
+    assert updated_mode == "connector"
+    assert response.json()["account_mode"] == "connector"
 
 
 def test_delete_my_account_returns_204(

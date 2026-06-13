@@ -150,7 +150,7 @@ CREATE TABLE IF NOT EXISTS geo_cities (
 );
 
 -- Profiles and privacy
-CREATE TABLE IF NOT EXISTS traveler_profiles (
+CREATE TABLE IF NOT EXISTS explorer_profiles (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     headline TEXT,
     bio TEXT,
@@ -172,7 +172,7 @@ CREATE TABLE IF NOT EXISTS traveler_profiles (
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS messenger_profiles (
+CREATE TABLE IF NOT EXISTS connector_profiles (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     home_country_id BIGINT REFERENCES geo_countries(id),
     home_state_id BIGINT REFERENCES geo_states(id),
@@ -231,7 +231,7 @@ CREATE TABLE IF NOT EXISTS travel_plan_destinations (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
-CREATE TABLE IF NOT EXISTS traveler_current_locations (
+CREATE TABLE IF NOT EXISTS explorer_current_locations (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     country_id BIGINT REFERENCES geo_countries(id),
     state_id BIGINT REFERENCES geo_states(id),
@@ -246,7 +246,7 @@ CREATE TABLE IF NOT EXISTS traveler_current_locations (
 );
 
 -- Social graph and discovery
-CREATE TABLE IF NOT EXISTS traveler_discovery_snapshots (
+CREATE TABLE IF NOT EXISTS explorer_discovery_snapshots (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     display_name TEXT,
     headline TEXT,
@@ -316,7 +316,7 @@ CREATE TABLE IF NOT EXISTS tinode_conversation_mappings (
 
 CREATE TABLE IF NOT EXISTS search_outbox_events (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    aggregate_type TEXT NOT NULL DEFAULT 'traveler_discovery_snapshot',
+    aggregate_type TEXT NOT NULL DEFAULT 'explorer_discovery_snapshot',
     aggregate_id UUID NOT NULL,
     event_type TEXT NOT NULL,
     payload JSONB NOT NULL DEFAULT '{}',
@@ -377,10 +377,10 @@ CREATE INDEX IF NOT EXISTS idx_geo_cities_country ON geo_cities(country_id);
 CREATE INDEX IF NOT EXISTS idx_geo_cities_name_trgm ON geo_cities USING gin (name gin_trgm_ops);
 CREATE INDEX IF NOT EXISTS idx_geo_cities_state_name ON geo_cities (state_id, name);
 
-CREATE INDEX IF NOT EXISTS idx_traveler_profiles_discoverable
-    ON traveler_profiles(visibility, connection_availability)
+CREATE INDEX IF NOT EXISTS idx_explorer_profiles_discoverable
+    ON explorer_profiles(visibility, connection_availability)
     WHERE visibility = 'discoverable';
-CREATE INDEX IF NOT EXISTS idx_traveler_profiles_home_country ON traveler_profiles(home_country_id);
+CREATE INDEX IF NOT EXISTS idx_explorer_profiles_home_country ON explorer_profiles(home_country_id);
 
 CREATE INDEX IF NOT EXISTS idx_travel_plans_user_status ON travel_plans(user_id, status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_travel_plans_one_primary_per_user
@@ -391,13 +391,13 @@ CREATE INDEX IF NOT EXISTS idx_travel_plan_destinations_plan
     ON travel_plan_destinations(travel_plan_id, sort_order);
 CREATE INDEX IF NOT EXISTS idx_travel_plan_destinations_country ON travel_plan_destinations(country_id);
 
-CREATE INDEX IF NOT EXISTS idx_traveler_current_locations_country ON traveler_current_locations(country_id);
+CREATE INDEX IF NOT EXISTS idx_explorer_current_locations_country ON explorer_current_locations(country_id);
 
-CREATE INDEX IF NOT EXISTS idx_traveler_discovery_dest_country
-    ON traveler_discovery_snapshots(destination_country_iso)
+CREATE INDEX IF NOT EXISTS idx_explorer_discovery_dest_country
+    ON explorer_discovery_snapshots(destination_country_iso)
     WHERE is_discoverable = true;
-CREATE INDEX IF NOT EXISTS idx_traveler_discovery_current_country
-    ON traveler_discovery_snapshots(current_country_iso)
+CREATE INDEX IF NOT EXISTS idx_explorer_discovery_current_country
+    ON explorer_discovery_snapshots(current_country_iso)
     WHERE is_discoverable = true AND current_country_iso IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_connection_requests_recipient_pending
@@ -438,7 +438,7 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'users_account_mode_check') THEN
         ALTER TABLE users ADD CONSTRAINT users_account_mode_check CHECK (
             account_mode IS NULL
-            OR account_mode IN ('traveler', 'messenger')
+            OR account_mode IN ('explorer', 'connector')
         );
     END IF;
 
@@ -470,14 +470,14 @@ BEGIN
         );
     END IF;
 
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'traveler_profiles_availability_check') THEN
-        ALTER TABLE traveler_profiles ADD CONSTRAINT traveler_profiles_availability_check CHECK (
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'explorer_profiles_availability_check') THEN
+        ALTER TABLE explorer_profiles ADD CONSTRAINT explorer_profiles_availability_check CHECK (
             connection_availability IN ('open', 'limited', 'unavailable')
         );
     END IF;
 
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'traveler_profiles_visibility_check') THEN
-        ALTER TABLE traveler_profiles ADD CONSTRAINT traveler_profiles_visibility_check CHECK (
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'explorer_profiles_visibility_check') THEN
+        ALTER TABLE explorer_profiles ADD CONSTRAINT explorer_profiles_visibility_check CHECK (
             visibility IN ('discoverable', 'connections_only', 'hidden')
         );
     END IF;
@@ -500,8 +500,8 @@ BEGIN
         );
     END IF;
 
-    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'traveler_current_locations_source_check') THEN
-        ALTER TABLE traveler_current_locations ADD CONSTRAINT traveler_current_locations_source_check CHECK (
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'explorer_current_locations_source_check') THEN
+        ALTER TABLE explorer_current_locations ADD CONSTRAINT explorer_current_locations_source_check CHECK (
             source IN ('manual', 'gps', 'inferred')
         );
     END IF;
