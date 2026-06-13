@@ -8,7 +8,7 @@ import time
 import httpx
 
 from core.config.settings import settings
-from core.logging.logger import get_logger, log_info
+from core.logging.logger import get_logger, log_debug
 
 logger = get_logger(__name__)
 
@@ -53,7 +53,7 @@ async def wait_for_keycloak(
             try:
                 response = await client.get(probe_url)
                 if response.status_code == 200:
-                    log_info(logger, "Keycloak is ready", base_url=resolved_base)
+                    log_debug(logger, "Keycloak is ready", base_url=resolved_base)
                     return
             except httpx.HTTPError:
                 pass

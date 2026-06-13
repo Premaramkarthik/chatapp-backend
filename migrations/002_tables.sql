@@ -122,25 +122,31 @@ CREATE TABLE IF NOT EXISTS signup_sessions (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
--- Geographic reference
+-- Geographic reference (master data; populated via scripts/sync_geo_from_csc.py)
 CREATE TABLE IF NOT EXISTS geo_countries (
-    iso_alpha2 CHAR(2) PRIMARY KEY,
-    name TEXT NOT NULL,
-    region TEXT,
-    is_active BOOLEAN NOT NULL DEFAULT true,
+    id BIGSERIAL PRIMARY KEY,
+    iso2 CHAR(2) NOT NULL UNIQUE,
+    iso3 CHAR(3) NOT NULL UNIQUE,
+    name VARCHAR(100) NOT NULL,
+    phone_code VARCHAR(10),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS geo_states (
+    id BIGSERIAL PRIMARY KEY,
+    country_id BIGINT NOT NULL REFERENCES geo_countries(id) ON DELETE CASCADE,
+    state_code VARCHAR(20),
+    name VARCHAR(100) NOT NULL,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 CREATE TABLE IF NOT EXISTS geo_cities (
-    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    country_iso CHAR(2) NOT NULL REFERENCES geo_countries(iso_alpha2),
-    name TEXT NOT NULL,
-    admin1_code TEXT,
-    latitude NUMERIC(9, 6),
-    longitude NUMERIC(9, 6),
-    slug TEXT NOT NULL,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
-    CONSTRAINT geo_cities_country_slug_unique UNIQUE (country_iso, slug)
+    id BIGSERIAL PRIMARY KEY,
+    csc_city_id BIGINT NOT NULL UNIQUE,
+    country_id BIGINT NOT NULL REFERENCES geo_countries(id) ON DELETE CASCADE,
+    state_id BIGINT NOT NULL REFERENCES geo_states(id) ON DELETE CASCADE,
+    name VARCHAR(150) NOT NULL,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
 -- Profiles and privacy
@@ -149,8 +155,12 @@ CREATE TABLE IF NOT EXISTS traveler_profiles (
     headline TEXT,
     bio TEXT,
     avatar_url TEXT,
-    home_country_iso CHAR(2) REFERENCES geo_countries(iso_alpha2),
-    home_city_id UUID REFERENCES geo_cities(id),
+    home_country_id BIGINT REFERENCES geo_countries(id),
+    home_state_id BIGINT REFERENCES geo_states(id),
+    home_city_id BIGINT REFERENCES geo_cities(id),
+    custom_home_country_name VARCHAR(100),
+    custom_home_state_name VARCHAR(100),
+    custom_home_city_name VARCHAR(150),
     languages TEXT[] NOT NULL DEFAULT '{}',
     interests TEXT[] NOT NULL DEFAULT '{}',
     connection_availability TEXT NOT NULL DEFAULT 'open',
@@ -164,12 +174,20 @@ CREATE TABLE IF NOT EXISTS traveler_profiles (
 
 CREATE TABLE IF NOT EXISTS messenger_profiles (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    home_country_iso CHAR(2) REFERENCES geo_countries(iso_alpha2),
-    home_city_id UUID REFERENCES geo_cities(id),
+    home_country_id BIGINT REFERENCES geo_countries(id),
+    home_state_id BIGINT REFERENCES geo_states(id),
+    home_city_id BIGINT REFERENCES geo_cities(id),
+    custom_home_country_name VARCHAR(100),
+    custom_home_state_name VARCHAR(100),
+    custom_home_city_name VARCHAR(150),
     preferred_destination_countries CHAR(2)[] NOT NULL DEFAULT '{}',
     bio TEXT,
-    last_search_country_iso CHAR(2) REFERENCES geo_countries(iso_alpha2),
-    last_search_city_id UUID REFERENCES geo_cities(id),
+    last_search_country_id BIGINT REFERENCES geo_countries(id),
+    last_search_state_id BIGINT REFERENCES geo_states(id),
+    last_search_city_id BIGINT REFERENCES geo_cities(id),
+    custom_last_search_country_name VARCHAR(100),
+    custom_last_search_state_name VARCHAR(100),
+    custom_last_search_city_name VARCHAR(150),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
@@ -201,8 +219,12 @@ CREATE TABLE IF NOT EXISTS travel_plans (
 CREATE TABLE IF NOT EXISTS travel_plan_destinations (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     travel_plan_id UUID NOT NULL REFERENCES travel_plans(id) ON DELETE CASCADE,
-    country_iso CHAR(2) NOT NULL REFERENCES geo_countries(iso_alpha2),
-    city_id UUID REFERENCES geo_cities(id),
+    country_id BIGINT REFERENCES geo_countries(id),
+    state_id BIGINT REFERENCES geo_states(id),
+    city_id BIGINT REFERENCES geo_cities(id),
+    custom_country_name VARCHAR(100),
+    custom_state_name VARCHAR(100),
+    custom_city_name VARCHAR(150),
     sort_order INT NOT NULL DEFAULT 0,
     arrival_date DATE,
     departure_date DATE,
@@ -211,8 +233,12 @@ CREATE TABLE IF NOT EXISTS travel_plan_destinations (
 
 CREATE TABLE IF NOT EXISTS traveler_current_locations (
     user_id UUID PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
-    country_iso CHAR(2) REFERENCES geo_countries(iso_alpha2),
-    city_id UUID REFERENCES geo_cities(id),
+    country_id BIGINT REFERENCES geo_countries(id),
+    state_id BIGINT REFERENCES geo_states(id),
+    city_id BIGINT REFERENCES geo_cities(id),
+    custom_country_name VARCHAR(100),
+    custom_state_name VARCHAR(100),
+    custom_city_name VARCHAR(150),
     latitude NUMERIC(9, 6),
     longitude NUMERIC(9, 6),
     source TEXT NOT NULL DEFAULT 'manual',
@@ -226,11 +252,11 @@ CREATE TABLE IF NOT EXISTS traveler_discovery_snapshots (
     headline TEXT,
     avatar_url TEXT,
     home_country_iso CHAR(2),
-    destination_country_iso CHAR(2) NOT NULL,
-    destination_city_id UUID,
+    destination_country_iso CHAR(2),
+    destination_city_id BIGINT,
     destination_city_name TEXT,
     current_country_iso CHAR(2),
-    current_city_id UUID,
+    current_city_id BIGINT,
     current_city_name TEXT,
     geo_lat NUMERIC(9, 6),
     geo_lng NUMERIC(9, 6),
@@ -340,13 +366,21 @@ CREATE INDEX IF NOT EXISTS idx_signup_sessions_active
     ON signup_sessions(token_hash)
     WHERE revoked_at IS NULL;
 
-CREATE INDEX IF NOT EXISTS idx_geo_cities_country ON geo_cities(country_iso);
+CREATE INDEX IF NOT EXISTS idx_geo_countries_name_trgm ON geo_countries USING gin (name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_geo_states_country ON geo_states(country_id);
+CREATE INDEX IF NOT EXISTS idx_geo_states_name_trgm ON geo_states USING gin (name gin_trgm_ops);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_geo_states_country_code_unique
+    ON geo_states(country_id, state_code)
+    WHERE state_code IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_geo_cities_state ON geo_cities(state_id);
+CREATE INDEX IF NOT EXISTS idx_geo_cities_country ON geo_cities(country_id);
 CREATE INDEX IF NOT EXISTS idx_geo_cities_name_trgm ON geo_cities USING gin (name gin_trgm_ops);
+CREATE INDEX IF NOT EXISTS idx_geo_cities_state_name ON geo_cities (state_id, name);
 
 CREATE INDEX IF NOT EXISTS idx_traveler_profiles_discoverable
     ON traveler_profiles(visibility, connection_availability)
     WHERE visibility = 'discoverable';
-CREATE INDEX IF NOT EXISTS idx_traveler_profiles_home_country ON traveler_profiles(home_country_iso);
+CREATE INDEX IF NOT EXISTS idx_traveler_profiles_home_country ON traveler_profiles(home_country_id);
 
 CREATE INDEX IF NOT EXISTS idx_travel_plans_user_status ON travel_plans(user_id, status);
 CREATE UNIQUE INDEX IF NOT EXISTS idx_travel_plans_one_primary_per_user
@@ -355,9 +389,9 @@ CREATE UNIQUE INDEX IF NOT EXISTS idx_travel_plans_one_primary_per_user
 
 CREATE INDEX IF NOT EXISTS idx_travel_plan_destinations_plan
     ON travel_plan_destinations(travel_plan_id, sort_order);
-CREATE INDEX IF NOT EXISTS idx_travel_plan_destinations_country ON travel_plan_destinations(country_iso);
+CREATE INDEX IF NOT EXISTS idx_travel_plan_destinations_country ON travel_plan_destinations(country_id);
 
-CREATE INDEX IF NOT EXISTS idx_traveler_current_locations_country ON traveler_current_locations(country_iso);
+CREATE INDEX IF NOT EXISTS idx_traveler_current_locations_country ON traveler_current_locations(country_id);
 
 CREATE INDEX IF NOT EXISTS idx_traveler_discovery_dest_country
     ON traveler_discovery_snapshots(destination_country_iso)

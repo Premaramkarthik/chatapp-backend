@@ -30,6 +30,8 @@ dependencies = [
     "redis>=5.2.0",
     "ruff>=0.15.13",
     "uvicorn[standard]>=0.35.0",
+    "countrystatecity-countries>=1.0.3",
+    "tqdm>=4.68.2",
 ]
 
 [dependency-groups]

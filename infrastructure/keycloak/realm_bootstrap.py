@@ -7,7 +7,7 @@ import json
 import httpx
 
 from core.config.settings import REPO_ROOT, settings
-from core.logging.logger import get_logger, log_info
+from core.logging.logger import get_logger, log_debug
 from infrastructure.keycloak.master_admin import get_master_admin_token, wait_for_keycloak
 from v1.utils.base import ConfigurationError
 
@@ -53,7 +53,7 @@ async def ensure_keycloak_realm() -> None:
     async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
         discovery = await client.get(settings.keycloak.well_known_url)
         if discovery.status_code == 200:
-            log_info(
+            log_debug(
                 logger,
                 "Skipping Keycloak realm bootstrap because realm already exists",
                 realm=settings.keycloak.realm,
@@ -86,7 +86,7 @@ async def ensure_keycloak_realm() -> None:
     async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
         response = await client.post(create_url, headers=headers, json=realm_payload)
         if response.status_code == 409:
-            log_info(
+            log_debug(
                 logger,
                 "Skipping Keycloak realm bootstrap because realm already exists",
                 realm=settings.keycloak.realm,
@@ -103,7 +103,7 @@ async def ensure_keycloak_realm() -> None:
                 },
             )
 
-    log_info(
+    log_debug(
         logger,
         "Keycloak realm bootstrap completed",
         realm=settings.keycloak.realm,

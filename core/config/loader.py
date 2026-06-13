@@ -73,6 +73,17 @@ YAML_ENV_MAP: dict[tuple[str, ...], str] = {
     ("auth", "default_signup_roles"): "AUTH_DEFAULT_SIGNUP_ROLES",
     ("auth", "verification_reconcile_enabled"): "AUTH_VERIFICATION_RECONCILE_ENABLED",
     ("auth", "signup_resend_cooldown_sec"): "AUTH_SIGNUP_RESEND_COOLDOWN_SEC",
+    ("geo", "cache_enabled"): "GEO_CACHE_ENABLED",
+    ("geo", "cache_ttl_countries_sec"): "GEO_CACHE_TTL_COUNTRIES_SEC",
+    ("geo", "cache_ttl_states_sec"): "GEO_CACHE_TTL_STATES_SEC",
+    ("geo", "cache_ttl_cities_sec"): "GEO_CACHE_TTL_CITIES_SEC",
+    ("geo", "cache_log_enabled"): "GEO_CACHE_LOG_ENABLED",
+    ("geo", "search_default_limit"): "GEO_SEARCH_DEFAULT_LIMIT",
+    ("geo", "search_max_limit"): "GEO_SEARCH_MAX_LIMIT",
+    ("geo", "search_min_chars"): "GEO_SEARCH_MIN_CHARS",
+    ("geo", "list_limit_countries"): "GEO_LIST_LIMIT_COUNTRIES",
+    ("geo", "list_limit_states"): "GEO_LIST_LIMIT_STATES",
+    ("geo", "list_limit_cities"): "GEO_LIST_LIMIT_CITIES",
 }
 
 

@@ -1,66 +1,4 @@
 services:
-  # api:
-  #   build:
-  #     context: .
-  #   environment:
-  #     DB_HOST: postgres
-  #     DB_PORT: 5432
-  #     DB_USER: ${DB_USER:-chatapp}
-  #     DB_PASSWORD: ${DB_PASSWORD:-chatapp}
-  #     DB_NAME: ${DB_NAME:-chatapp}
-  #     REDIS_ENABLED: ${REDIS_ENABLED:-true}
-  #     REDIS_URL: redis://redis:6379/0
-  #     KEYCLOAK_BASE_URL: http://localhost:8180
-  #     KEYCLOAK_PUBLIC_BASE_URL: ${KEYCLOAK_PUBLIC_BASE_URL:-http://localhost:8180}
-  #     KEYCLOAK_INTERNAL_BASE_URL: http://keycloak:8080
-  #     KEYCLOAK_ISSUER_URL: ${KEYCLOAK_ISSUER_URL:-http://localhost:8180/realms/${KEYCLOAK_REALM:-chatapp}}
-  #     KEYCLOAK_REALM: ${KEYCLOAK_REALM:-chatapp}
-  #     KEYCLOAK_AUDIENCE: ${KEYCLOAK_AUDIENCE:-chatapp-api}
-  #     KEYCLOAK_WEB_CLIENT_ID: ${KEYCLOAK_WEB_CLIENT_ID:-chatapp-web}
-  #     KEYCLOAK_WEB_CLIENT_SECRET: ${KEYCLOAK_WEB_CLIENT_SECRET:-change-me}
-  #     KEYCLOAK_ADMIN_CLIENT_ID: ${KEYCLOAK_ADMIN_CLIENT_ID:-chatapp-backend-admin}
-  #     KEYCLOAK_ADMIN_CLIENT_SECRET: ${KEYCLOAK_ADMIN_CLIENT_SECRET:-change-me}
-  #     AUTH_CALLBACK_URL: ${AUTH_CALLBACK_URL:-http://localhost:8000/v1/auth/signin/callback}
-  #     AUTH_DEFAULT_POST_SIGNIN_REDIRECT_URL: ${AUTH_DEFAULT_POST_SIGNIN_REDIRECT_URL:-http://localhost:3000}
-  #     AUTH_POST_LOGOUT_REDIRECT_URL: ${AUTH_POST_LOGOUT_REDIRECT_URL:-http://localhost:3000}
-  #     AUTH_ALLOWED_REDIRECT_ORIGINS: ${AUTH_ALLOWED_REDIRECT_ORIGINS:-http://localhost:3000}
-  #     AUTH_TOKEN_ENCRYPTION_KEY: ${AUTH_TOKEN_ENCRYPTION_KEY:-dev-auth-token-encryption-key-change-me}
-  #     AUTH_CAPTCHA_REQUIRED: ${AUTH_CAPTCHA_REQUIRED:-false}
-  #     AUTH_SIGNUP_IP_LIMIT: ${AUTH_SIGNUP_IP_LIMIT:-5}
-  #     AUTH_SIGNUP_DEVICE_LIMIT: ${AUTH_SIGNUP_DEVICE_LIMIT:-5}
-  #     AUTH_SIGNUP_DOMAIN_LIMIT: ${AUTH_SIGNUP_DOMAIN_LIMIT:-20}
-  #     AUTH_SIGNUP_RESEND_EMAIL_LIMIT: ${AUTH_SIGNUP_RESEND_EMAIL_LIMIT:-3}
-  #     AUTH_SIGNUP_SOCIAL_IP_LIMIT: ${AUTH_SIGNUP_SOCIAL_IP_LIMIT:-10}
-  #     AUTH_BLOCKED_EMAIL_DOMAINS: ${AUTH_BLOCKED_EMAIL_DOMAINS:-tempmail.com,guerrillamail.com,10minutemail.com}
-  #     AUTH_DEFAULT_SIGNUP_ROLES: ${AUTH_DEFAULT_SIGNUP_ROLES:-profile:update,session:manage,message:send,message:create-room,trip:create,trip:update,trip:join}
-  #     TINODE_ENABLED: ${TINODE_ENABLED:-true}
-  #     TINODE_WEB_URL: http://tinode:6060
-  #     TINODE_GRPC_HOST: tinode:16060
-  #     TINODE_API_KEY: ${TINODE_API_KEY:-dev-tinode-api-key}
-  #     TINODE_REST_AUTH_SHARED_SECRET: ${TINODE_REST_AUTH_SHARED_SECRET:-dev-tinode-rest-auth-secret}
-  #     TINODE_AUTH_ALLOW_PLAINTEXT_DEV_SECRET: ${TINODE_AUTH_ALLOW_PLAINTEXT_DEV_SECRET:-true}
-  #     TINODE_GRPC_REQUIRED: ${TINODE_GRPC_REQUIRED:-false}
-  #     TINODE_AUTO_PROVISION_ON_ACCEPT: ${TINODE_AUTO_PROVISION_ON_ACCEPT:-false}
-  #     MEILI_URL: http://meilisearch:7700
-  #     MEILI_MASTER_KEY: ${MEILI_MASTER_KEY:-dev-meili-master-key}
-  #   depends_on:
-  #     postgres:
-  #       condition: service_healthy
-  #     migrate:
-  #       condition: service_completed_successfully
-  #     keycloak:
-  #       condition: service_started
-  #     redis:
-  #       condition: service_healthy
-  #     tinode:
-  #       condition: service_started
-  #     meilisearch:
-  #       condition: service_healthy
-  #   ports:
-  #     - "8000:8000"
-  #   volumes:
-  #     - ./logs:/app/logs
-
   postgres:
     image: postgres:17-alpine
     environment:
@@ -129,6 +67,16 @@ services:
       interval: 5s
       timeout: 5s
       retries: 12
+
+  redisinsight:
+    image: redis/redisinsight:latest
+    depends_on:
+      redis:
+        condition: service_healthy
+    ports:
+      - "${REDISINSIGHT_HOST_PORT:-5540}:5540"
+    volumes:
+      - redisinsight_data:/data
 
   tinode:
     image: tinode/tinode-postgres:latest
@@ -286,6 +234,7 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  redisinsight_data:
   pgadmin_data:
   meili_data:
   prometheus_data:

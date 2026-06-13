@@ -53,6 +53,11 @@ def parse_args() -> argparse.Namespace:
         default=str(MIGRATIONS_DIR),
         help="SQL migration folder",
     )
+    parser.add_argument(
+        "--repair-changed",
+        action="store_true",
+        help="Re-apply migrations whose checksum changed since last apply (dev only)",
+    )
     return parser.parse_args()
 
 
@@ -60,13 +65,22 @@ async def main() -> int:
     args = parse_args()
     dsn = args.database_url or settings.database.dsn
     migrations_dir = Path(args.migrations_dir)
-    results = await run_migrations(dsn, migrations_dir)
+    results = await run_migrations(
+        dsn,
+        migrations_dir,
+        repair_changed=args.repair_changed,
+    )
     for result in results:
         print(f"{result.status}: {result.filename}")
     return 0
 
 
-async def run_migrations(dsn: str, migrations_dir: Path = MIGRATIONS_DIR) -> list[MigrationResult]:
+async def run_migrations(
+    dsn: str,
+    migrations_dir: Path = MIGRATIONS_DIR,
+    *,
+    repair_changed: bool = False,
+) -> list[MigrationResult]:
     """Apply unapplied SQL files in filename order."""
     migration_files = await asyncio.to_thread(_load_migration_files, migrations_dir)
     conn = await asyncpg.connect(dsn=dsn)
@@ -80,9 +94,24 @@ async def run_migrations(dsn: str, migrations_dir: Path = MIGRATIONS_DIR) -> lis
             )
             if row is not None:
                 if row["checksum"] != migration.checksum:
-                    raise RuntimeError(
-                        f"Migration checksum changed after apply: {migration.filename}"
-                    )
+                    if not repair_changed:
+                        raise RuntimeError(
+                            f"Migration checksum changed after apply: {migration.filename}. "
+                            "Re-run with --repair-changed to re-apply (dev only)."
+                        )
+                    async with conn.transaction():
+                        await conn.execute(migration.sql)
+                        await conn.execute(
+                            """
+                            UPDATE schema_migrations
+                            SET checksum = $2, applied_at = now()
+                            WHERE filename = $1
+                            """,
+                            migration.filename,
+                            migration.checksum,
+                        )
+                    results.append(MigrationResult(filename=migration.filename, status="repaired"))
+                    continue
                 results.append(MigrationResult(filename=migration.filename, status="skipped"))
                 continue
 

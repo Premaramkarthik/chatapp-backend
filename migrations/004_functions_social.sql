@@ -64,7 +64,7 @@ BEGIN
         u.account_mode,
         tp.headline,
         tp.avatar_url,
-        tp.home_country_iso,
+        gc_home.iso2 AS home_country_iso,
         tp.languages,
         tp.interests,
         tp.connection_availability,
@@ -73,24 +73,26 @@ BEGIN
         COALESCE(ups.allow_search_discovery, true) AS allow_search_discovery,
         COALESCE(ups.show_current_location, true) AS show_current_location,
         COALESCE(ups.show_trip_dates, true) AS show_trip_dates,
-        tcl.country_iso AS current_country_iso,
+        gc_cur_ctry.iso2 AS current_country_iso,
         tcl.city_id AS current_city_id,
-        gc_cur.name AS current_city_name,
+        COALESCE(tcl.custom_city_name, gc_cur.name) AS current_city_name,
         tcl.latitude AS current_lat,
         tcl.longitude AS current_lng,
         tplan.start_date AS trip_start_date,
         tplan.end_date AS trip_end_date,
-        tdest.country_iso AS destination_country_iso,
+        gc_dest_ctry.iso2 AS destination_country_iso,
         tdest.city_id AS destination_city_id,
-        gc_dest.name AS destination_city_name,
-        gc_dest.latitude AS dest_lat,
-        gc_dest.longitude AS dest_lng
+        COALESCE(tdest.custom_city_name, gc_dest.name) AS destination_city_name,
+        NULL::numeric AS dest_lat,
+        NULL::numeric AS dest_lng
     INTO ctx
     FROM users u
     LEFT JOIN traveler_profiles tp ON tp.user_id = u.id
+    LEFT JOIN geo_countries gc_home ON gc_home.id = tp.home_country_id
     LEFT JOIN user_privacy_settings ups ON ups.user_id = u.id
     LEFT JOIN traveler_current_locations tcl ON tcl.user_id = u.id
     LEFT JOIN geo_cities gc_cur ON gc_cur.id = tcl.city_id
+    LEFT JOIN geo_countries gc_cur_ctry ON gc_cur_ctry.id = tcl.country_id
     LEFT JOIN LATERAL (
         SELECT id, start_date, end_date
         FROM travel_plans
@@ -99,13 +101,14 @@ BEGIN
         LIMIT 1
     ) tplan ON true
     LEFT JOIN LATERAL (
-        SELECT country_iso, city_id
+        SELECT country_id, city_id, custom_city_name
         FROM travel_plan_destinations
         WHERE travel_plan_id = tplan.id
         ORDER BY sort_order ASC
         LIMIT 1
     ) tdest ON true
     LEFT JOIN geo_cities gc_dest ON gc_dest.id = tdest.city_id
+    LEFT JOIN geo_countries gc_dest_ctry ON gc_dest_ctry.id = tdest.country_id
     WHERE u.id = p_user_id;
 
     IF NOT FOUND THEN
@@ -120,7 +123,9 @@ BEGIN
     END IF;
 
     dest_country := COALESCE(ctx.destination_country_iso, ctx.home_country_iso);
-    IF dest_country IS NULL THEN
+    IF dest_country IS NULL
+       AND ctx.destination_city_name IS NULL
+       AND ctx.destination_city_id IS NULL THEN
         DELETE FROM traveler_discovery_snapshots WHERE user_id = p_user_id;
         PERFORM social_enqueue_search_outbox(p_user_id, 'delete');
         RETURN NULL;
@@ -273,8 +278,12 @@ BEGIN
             headline,
             bio,
             avatar_url,
-            home_country_iso,
+            home_country_id,
+            home_state_id,
             home_city_id,
+            custom_home_country_name,
+            custom_home_state_name,
+            custom_home_city_name,
             languages,
             interests,
             connection_availability,
@@ -286,8 +295,12 @@ BEGIN
             NULLIF(payload->>'headline', ''),
             NULLIF(payload->>'bio', ''),
             NULLIF(payload->>'avatar_url', ''),
-            NULLIF(payload->>'home_country_iso', ''),
-            NULLIF(payload->>'home_city_id', '')::uuid,
+            NULLIF(payload->>'home_country_id', '')::bigint,
+            NULLIF(payload->>'home_state_id', '')::bigint,
+            NULLIF(payload->>'home_city_id', '')::bigint,
+            NULLIF(payload->>'custom_home_country_name', ''),
+            NULLIF(payload->>'custom_home_state_name', ''),
+            NULLIF(payload->>'custom_home_city_name', ''),
             CASE
                 WHEN payload ? 'languages' THEN
                     ARRAY(SELECT jsonb_array_elements_text(payload->'languages'))
@@ -306,14 +319,33 @@ BEGIN
             headline = COALESCE(NULLIF(payload->>'headline', ''), traveler_profiles.headline),
             bio = COALESCE(NULLIF(payload->>'bio', ''), traveler_profiles.bio),
             avatar_url = COALESCE(NULLIF(payload->>'avatar_url', ''), traveler_profiles.avatar_url),
-            home_country_iso = COALESCE(
-                NULLIF(payload->>'home_country_iso', ''),
-                traveler_profiles.home_country_iso
-            ),
-            home_city_id = COALESCE(
-                NULLIF(payload->>'home_city_id', '')::uuid,
-                traveler_profiles.home_city_id
-            ),
+            home_country_id = CASE
+                WHEN payload ? 'home_country_id' THEN NULLIF(payload->>'home_country_id', '')::bigint
+                ELSE traveler_profiles.home_country_id
+            END,
+            home_state_id = CASE
+                WHEN payload ? 'home_state_id' THEN NULLIF(payload->>'home_state_id', '')::bigint
+                ELSE traveler_profiles.home_state_id
+            END,
+            home_city_id = CASE
+                WHEN payload ? 'home_city_id' THEN NULLIF(payload->>'home_city_id', '')::bigint
+                ELSE traveler_profiles.home_city_id
+            END,
+            custom_home_country_name = CASE
+                WHEN payload ? 'custom_home_country_name'
+                THEN NULLIF(payload->>'custom_home_country_name', '')
+                ELSE traveler_profiles.custom_home_country_name
+            END,
+            custom_home_state_name = CASE
+                WHEN payload ? 'custom_home_state_name'
+                THEN NULLIF(payload->>'custom_home_state_name', '')
+                ELSE traveler_profiles.custom_home_state_name
+            END,
+            custom_home_city_name = CASE
+                WHEN payload ? 'custom_home_city_name'
+                THEN NULLIF(payload->>'custom_home_city_name', '')
+                ELSE traveler_profiles.custom_home_city_name
+            END,
             languages = CASE
                 WHEN payload ? 'languages' THEN
                     ARRAY(SELECT jsonb_array_elements_text(payload->'languages'))
@@ -372,36 +404,90 @@ BEGIN
 
         INSERT INTO messenger_profiles (
             user_id,
-            home_country_iso,
+            home_country_id,
+            home_state_id,
+            home_city_id,
+            custom_home_country_name,
+            custom_home_state_name,
+            custom_home_city_name,
             preferred_destination_countries,
-            last_search_country_iso,
+            last_search_country_id,
+            last_search_state_id,
             last_search_city_id,
+            custom_last_search_country_name,
+            custom_last_search_state_name,
+            custom_last_search_city_name,
             bio
         )
         VALUES (
             uid,
-            NULLIF(payload->>'home_country_iso', ''),
+            NULLIF(payload->>'home_country_id', '')::bigint,
+            NULLIF(payload->>'home_state_id', '')::bigint,
+            NULLIF(payload->>'home_city_id', '')::bigint,
+            NULLIF(payload->>'custom_home_country_name', ''),
+            NULLIF(payload->>'custom_home_state_name', ''),
+            NULLIF(payload->>'custom_home_city_name', ''),
             COALESCE(dest_countries, '{}'::char(2)[]),
-            NULLIF(payload->>'last_search_country_iso', ''),
-            NULLIF(payload->>'last_search_city_id', '')::uuid,
+            NULLIF(payload->>'last_search_country_id', '')::bigint,
+            NULLIF(payload->>'last_search_state_id', '')::bigint,
+            NULLIF(payload->>'last_search_city_id', '')::bigint,
+            NULLIF(payload->>'custom_last_search_country_name', ''),
+            NULLIF(payload->>'custom_last_search_state_name', ''),
+            NULLIF(payload->>'custom_last_search_city_name', ''),
             NULLIF(payload->>'bio', '')
         )
         ON CONFLICT (user_id) DO UPDATE SET
-            home_country_iso = COALESCE(
-                NULLIF(payload->>'home_country_iso', ''),
-                messenger_profiles.home_country_iso
+            home_country_id = COALESCE(
+                NULLIF(payload->>'home_country_id', '')::bigint,
+                messenger_profiles.home_country_id
+            ),
+            home_state_id = COALESCE(
+                NULLIF(payload->>'home_state_id', '')::bigint,
+                messenger_profiles.home_state_id
+            ),
+            home_city_id = COALESCE(
+                NULLIF(payload->>'home_city_id', '')::bigint,
+                messenger_profiles.home_city_id
+            ),
+            custom_home_country_name = COALESCE(
+                NULLIF(payload->>'custom_home_country_name', ''),
+                messenger_profiles.custom_home_country_name
+            ),
+            custom_home_state_name = COALESCE(
+                NULLIF(payload->>'custom_home_state_name', ''),
+                messenger_profiles.custom_home_state_name
+            ),
+            custom_home_city_name = COALESCE(
+                NULLIF(payload->>'custom_home_city_name', ''),
+                messenger_profiles.custom_home_city_name
             ),
             preferred_destination_countries = COALESCE(
                 dest_countries,
                 messenger_profiles.preferred_destination_countries
             ),
-            last_search_country_iso = COALESCE(
-                NULLIF(payload->>'last_search_country_iso', ''),
-                messenger_profiles.last_search_country_iso
+            last_search_country_id = COALESCE(
+                NULLIF(payload->>'last_search_country_id', '')::bigint,
+                messenger_profiles.last_search_country_id
+            ),
+            last_search_state_id = COALESCE(
+                NULLIF(payload->>'last_search_state_id', '')::bigint,
+                messenger_profiles.last_search_state_id
             ),
             last_search_city_id = COALESCE(
-                NULLIF(payload->>'last_search_city_id', '')::uuid,
+                NULLIF(payload->>'last_search_city_id', '')::bigint,
                 messenger_profiles.last_search_city_id
+            ),
+            custom_last_search_country_name = COALESCE(
+                NULLIF(payload->>'custom_last_search_country_name', ''),
+                messenger_profiles.custom_last_search_country_name
+            ),
+            custom_last_search_state_name = COALESCE(
+                NULLIF(payload->>'custom_last_search_state_name', ''),
+                messenger_profiles.custom_last_search_state_name
+            ),
+            custom_last_search_city_name = COALESCE(
+                NULLIF(payload->>'custom_last_search_city_name', ''),
+                messenger_profiles.custom_last_search_city_name
             ),
             bio = COALESCE(NULLIF(payload->>'bio', ''), messenger_profiles.bio),
             updated_at = now()
@@ -521,16 +607,24 @@ BEGIN
         LOOP
             INSERT INTO travel_plan_destinations (
                 travel_plan_id,
-                country_iso,
+                country_id,
+                state_id,
                 city_id,
+                custom_country_name,
+                custom_state_name,
+                custom_city_name,
                 sort_order,
                 arrival_date,
                 departure_date
             )
             VALUES (
                 plan.id,
-                UPPER(dest->>'country_iso'),
-                NULLIF(dest->>'city_id', '')::uuid,
+                NULLIF(dest->>'country_id', '')::bigint,
+                NULLIF(dest->>'state_id', '')::bigint,
+                NULLIF(dest->>'city_id', '')::bigint,
+                NULLIF(dest->>'custom_country_name', ''),
+                NULLIF(dest->>'custom_state_name', ''),
+                NULLIF(dest->>'custom_city_name', ''),
                 idx,
                 NULLIF(dest->>'arrival_date', '')::date,
                 NULLIF(dest->>'departure_date', '')::date
@@ -554,7 +648,6 @@ AS $$
 DECLARE
     result traveler_current_locations%ROWTYPE;
     uid UUID;
-    country CHAR(2);
 BEGIN
     uid := (payload->>'user_id')::uuid;
 
@@ -563,12 +656,14 @@ BEGIN
         RETURN CASE WHEN result.user_id IS NULL THEN NULL ELSE to_jsonb(result) END;
 
     ELSIF mode = 2 THEN
-        country := UPPER(NULLIF(payload->>'country_iso', ''));
-
         INSERT INTO traveler_current_locations (
             user_id,
-            country_iso,
+            country_id,
+            state_id,
             city_id,
+            custom_country_name,
+            custom_state_name,
+            custom_city_name,
             latitude,
             longitude,
             source,
@@ -576,16 +671,24 @@ BEGIN
         )
         VALUES (
             uid,
-            country,
-            NULLIF(payload->>'city_id', '')::uuid,
+            NULLIF(payload->>'country_id', '')::bigint,
+            NULLIF(payload->>'state_id', '')::bigint,
+            NULLIF(payload->>'city_id', '')::bigint,
+            NULLIF(payload->>'custom_country_name', ''),
+            NULLIF(payload->>'custom_state_name', ''),
+            NULLIF(payload->>'custom_city_name', ''),
             NULLIF(payload->>'latitude', '')::numeric,
             NULLIF(payload->>'longitude', '')::numeric,
             COALESCE(NULLIF(payload->>'source', ''), 'manual'),
             now()
         )
         ON CONFLICT (user_id) DO UPDATE SET
-            country_iso = EXCLUDED.country_iso,
+            country_id = EXCLUDED.country_id,
+            state_id = EXCLUDED.state_id,
             city_id = EXCLUDED.city_id,
+            custom_country_name = EXCLUDED.custom_country_name,
+            custom_state_name = EXCLUDED.custom_state_name,
+            custom_city_name = EXCLUDED.custom_city_name,
             latitude = EXCLUDED.latitude,
             longitude = EXCLUDED.longitude,
             source = EXCLUDED.source,

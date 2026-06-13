@@ -92,10 +92,12 @@ class MiddlewareSettings(EnvSettings):
         "/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/signin/password,"
         "/v1/auth/forgot-password,/v1/auth/reset-password/complete,/v1/auth/signup,"
         "/v1/auth/signup/start,/v1/auth/signup/complete,/v1/auth/signup/resend,"
-        "/v1/auth/signup/verify/complete,/v1/auth/signup/social/start",
+        "/v1/auth/signup/verify/complete,/v1/auth/signup/social/start,/v1/geo",
         alias="MIDDLEWARE_AUTH_PUBLIC_PATHS",
     )
-    auth_public_prefixes_raw: str = Field("/internal", alias="MIDDLEWARE_AUTH_PUBLIC_PREFIXES")
+    auth_public_prefixes_raw: str = Field(
+        "/internal,/v1/geo", alias="MIDDLEWARE_AUTH_PUBLIC_PREFIXES"
+    )
 
     rate_limit_enabled: bool = Field(True, alias="MIDDLEWARE_RATE_LIMIT_ENABLED")
     rate_limit_requests: int = Field(120, alias="MIDDLEWARE_RATE_LIMIT_REQUESTS")
@@ -530,6 +532,22 @@ class MeilisearchSettings(EnvSettings):
         return self.master_key.get_secret_value()
 
 
+class GeoSettings(EnvSettings):
+    """Geo autocomplete and cache settings."""
+
+    cache_enabled: bool = Field(True, alias="GEO_CACHE_ENABLED")
+    cache_ttl_countries_sec: int = Field(86400, alias="GEO_CACHE_TTL_COUNTRIES_SEC")
+    cache_ttl_states_sec: int = Field(86400, alias="GEO_CACHE_TTL_STATES_SEC")
+    cache_ttl_cities_sec: int = Field(3600, alias="GEO_CACHE_TTL_CITIES_SEC")
+    cache_log_enabled: bool = Field(True, alias="GEO_CACHE_LOG_ENABLED")
+    search_default_limit: int = Field(20, alias="GEO_SEARCH_DEFAULT_LIMIT")
+    search_max_limit: int = Field(50, alias="GEO_SEARCH_MAX_LIMIT")
+    search_min_chars: int = Field(0, alias="GEO_SEARCH_MIN_CHARS")
+    list_limit_countries: int = Field(300, alias="GEO_LIST_LIMIT_COUNTRIES")
+    list_limit_states: int = Field(500, alias="GEO_LIST_LIMIT_STATES")
+    list_limit_cities: int = Field(5000, alias="GEO_LIST_LIMIT_CITIES")
+
+
 class Settings:
     """Application settings grouped by concern."""
 
@@ -546,6 +564,7 @@ class Settings:
         self.redis = RedisSettings()
         self.tinode = TinodeSettings()
         self.meilisearch = MeilisearchSettings()
+        self.geo = GeoSettings()
         validate_production_settings(
             environment=self.app.environment,
             debug=self.app.debug,

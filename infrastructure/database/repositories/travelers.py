@@ -23,8 +23,12 @@ class PostgresTravelerRepository:
         headline: str | None = None,
         bio: str | None = None,
         avatar_url: str | None = None,
-        home_country_iso: str | None = None,
-        home_city_id: str | None = None,
+        home_country_id: int | None = None,
+        home_state_id: int | None = None,
+        home_city_id: int | None = None,
+        custom_home_country_name: str | None = None,
+        custom_home_state_name: str | None = None,
+        custom_home_city_name: str | None = None,
         languages: list[str] | None = None,
         interests: list[str] | None = None,
         connection_availability: str | None = None,
@@ -32,24 +36,24 @@ class PostgresTravelerRepository:
     ) -> dict[str, Any]:
         """Create or update a traveler profile."""
         payload: dict[str, Any] = {"user_id": user_id}
-        if headline is not None:
-            payload["headline"] = headline
-        if bio is not None:
-            payload["bio"] = bio
-        if avatar_url is not None:
-            payload["avatar_url"] = avatar_url
-        if home_country_iso is not None:
-            payload["home_country_iso"] = home_country_iso
-        if home_city_id is not None:
-            payload["home_city_id"] = home_city_id
-        if languages is not None:
-            payload["languages"] = languages
-        if interests is not None:
-            payload["interests"] = interests
-        if connection_availability is not None:
-            payload["connection_availability"] = connection_availability
-        if visibility is not None:
-            payload["visibility"] = visibility
+        field_map = {
+            "headline": headline,
+            "bio": bio,
+            "avatar_url": avatar_url,
+            "home_country_id": home_country_id,
+            "home_state_id": home_state_id,
+            "home_city_id": home_city_id,
+            "custom_home_country_name": custom_home_country_name,
+            "custom_home_state_name": custom_home_state_name,
+            "custom_home_city_name": custom_home_city_name,
+            "languages": languages,
+            "interests": interests,
+            "connection_availability": connection_availability,
+            "visibility": visibility,
+        }
+        for key, value in field_map.items():
+            if value is not None:
+                payload[key] = value
 
         result = await call_json_function("fn_traveler_profiles", 2, payload)
         row = row_from_jsonb(result)
@@ -71,24 +75,42 @@ class PostgresTravelerRepository:
         self,
         user_id: str,
         *,
-        home_country_iso: str | None = None,
+        home_country_id: int | None = None,
+        home_state_id: int | None = None,
+        home_city_id: int | None = None,
+        custom_home_country_name: str | None = None,
+        custom_home_state_name: str | None = None,
+        custom_home_city_name: str | None = None,
         preferred_destination_countries: list[str] | None = None,
-        last_search_country_iso: str | None = None,
-        last_search_city_id: str | None = None,
+        last_search_country_id: int | None = None,
+        last_search_state_id: int | None = None,
+        last_search_city_id: int | None = None,
+        custom_last_search_country_name: str | None = None,
+        custom_last_search_state_name: str | None = None,
+        custom_last_search_city_name: str | None = None,
         bio: str | None = None,
     ) -> dict[str, Any]:
         """Create or update messenger profile (search preferences)."""
         payload: dict[str, Any] = {"user_id": user_id}
-        if home_country_iso is not None:
-            payload["home_country_iso"] = home_country_iso
-        if preferred_destination_countries is not None:
-            payload["preferred_destination_countries"] = preferred_destination_countries
-        if last_search_country_iso is not None:
-            payload["last_search_country_iso"] = last_search_country_iso
-        if last_search_city_id is not None:
-            payload["last_search_city_id"] = last_search_city_id
-        if bio is not None:
-            payload["bio"] = bio
+        field_map = {
+            "home_country_id": home_country_id,
+            "home_state_id": home_state_id,
+            "home_city_id": home_city_id,
+            "custom_home_country_name": custom_home_country_name,
+            "custom_home_state_name": custom_home_state_name,
+            "custom_home_city_name": custom_home_city_name,
+            "preferred_destination_countries": preferred_destination_countries,
+            "last_search_country_id": last_search_country_id,
+            "last_search_state_id": last_search_state_id,
+            "last_search_city_id": last_search_city_id,
+            "custom_last_search_country_name": custom_last_search_country_name,
+            "custom_last_search_state_name": custom_last_search_state_name,
+            "custom_last_search_city_name": custom_last_search_city_name,
+            "bio": bio,
+        }
+        for key, value in field_map.items():
+            if value is not None:
+                payload[key] = value
 
         result = await call_json_function("fn_messenger_profiles", 2, payload)
         row = row_from_jsonb(result)

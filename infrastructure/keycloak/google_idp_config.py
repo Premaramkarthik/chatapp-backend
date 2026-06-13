@@ -8,7 +8,7 @@ from urllib.parse import urlparse, urlunparse
 import httpx
 
 from core.config.settings import settings
-from core.logging.logger import get_logger, log_info, log_warning
+from core.logging.logger import get_logger, log_debug, log_warning
 from infrastructure.keycloak.master_admin import get_master_admin_token
 from infrastructure.keycloak.smtp_config import _client_credentials_token
 
@@ -172,7 +172,7 @@ async def _ensure_web_client_redirect_uris(client: httpx.AsyncClient) -> None:
         json=client_payload,
     )
     update_response.raise_for_status()
-    log_info(
+    log_debug(
         logger,
         "Updated Keycloak web client redirect URIs and web origins",
         client_id=keycloak.web_client_id,
@@ -263,7 +263,7 @@ async def _ensure_google_broker_auto_link_flow(client: httpx.AsyncClient) -> Non
     created = not await _flow_alias_exists(client, flow_alias=GOOGLE_BROKER_FLOW_ALIAS)
     if created:
         await _create_broker_auto_link_flow(client)
-        log_info(
+        log_debug(
             logger,
             "Configured Google broker auto-link flow in Keycloak",
             realm=settings.keycloak.realm,
@@ -321,7 +321,7 @@ async def ensure_keycloak_google_idp() -> None:
         await _ensure_google_broker_auto_link_flow(client)
         await _upsert_google_idp(client, idp_payload=idp_payload)
 
-    log_info(
+    log_debug(
         logger,
         "Google identity provider configured in Keycloak",
         realm=settings.keycloak.realm,

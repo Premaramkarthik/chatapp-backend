@@ -5,7 +5,7 @@ from __future__ import annotations
 import httpx
 
 from core.config.settings import settings
-from core.logging.logger import get_logger, log_info, log_warning
+from core.logging.logger import get_logger, log_debug, log_warning
 from infrastructure.keycloak.master_admin import get_master_admin_token
 
 logger = get_logger(__name__)
@@ -116,7 +116,7 @@ async def ensure_keycloak_smtp() -> None:
                 smtp_server=smtp_server,
             )
 
-    log_info(
+    log_debug(
         logger,
         "Keycloak SMTP settings applied to realm",
         realm=keycloak.realm,

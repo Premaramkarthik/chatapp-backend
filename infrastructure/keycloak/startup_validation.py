@@ -84,7 +84,7 @@ async def validate_keycloak_startup() -> None:
 
     log_info(
         logger,
-        "Keycloak startup validation succeeded",
+        "Keycloak ready",
         realm=settings.keycloak.realm,
         web_client=settings.keycloak.web_client_id,
         api_client=settings.keycloak.audience,

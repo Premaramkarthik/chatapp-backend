@@ -9,7 +9,7 @@ from typing import Any
 import httpx
 
 from core.config.settings import settings
-from core.logging.logger import get_logger, log_info, log_warning
+from core.logging.logger import get_logger, log_debug, log_warning
 from core.observability.instrumentation import log_external_call
 from v1.utils.base import KeycloakIntegrationError
 
@@ -46,7 +46,7 @@ def _log_admin_response(
             error_type=error_type,
         )
         return
-    log_info(
+    log_debug(
         logger,
         "Keycloak Admin API request completed",
         method=method,

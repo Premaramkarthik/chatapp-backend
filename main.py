@@ -21,7 +21,7 @@ from infrastructure.meilisearch.client import get_meilisearch_client
 from infrastructure.meilisearch.index_settings import ensure_traveler_index_settings
 from infrastructure.redis.cache import auth_redis_cache
 from v1.middleware import setup_middleware
-from v1.routers import auth, chat, connections, health, internal, travelers, users
+from v1.routers import auth, chat, connections, geo, health, internal, travelers, users
 
 
 @asynccontextmanager
@@ -92,6 +92,7 @@ def create_app() -> FastAPI:
     api.include_router(connections.router)
     api.include_router(chat.router)
     api.include_router(internal.router)
+    api.include_router(geo.router)
     return api
 
 

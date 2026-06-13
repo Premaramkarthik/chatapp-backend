@@ -142,9 +142,6 @@ class FakeAuthService:
             expires_at=datetime(2026, 1, 1, tzinfo=UTC),
         )
 
-    async def sso_reset_url(self, *, redirect_uri: str, request):
-        return f"http://keycloak.test/logout?post_logout_redirect_uri={redirect_uri}"
-
 
 def test_signin_start_route_returns_authorization_url() -> None:
     app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
@@ -171,23 +168,6 @@ def test_signin_start_with_google_includes_idp_hint() -> None:
 
     assert response.status_code == 200
     assert "kc_idp_hint=google" in response.json()["authorization_url"]
-
-
-def test_sso_reset_url_returns_keycloak_logout_url() -> None:
-    app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
-    try:
-        with TestClient(app) as client:
-            response = client.get(
-                "/v1/auth/sso-reset-url",
-                params={"redirect_uri": "http://localhost:8080/auth/oauth-resume"},
-            )
-    finally:
-        app.dependency_overrides.clear()
-
-    assert response.status_code == 200
-    body = response.json()
-    assert body["url"].startswith("http://keycloak.test/logout")
-    assert "post_logout_redirect_uri=" in body["url"]
 
 
 def test_signin_password_sets_session_cookies() -> None:

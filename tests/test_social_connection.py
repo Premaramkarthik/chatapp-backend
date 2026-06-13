@@ -112,13 +112,38 @@ def test_should_index_snapshot() -> None:
     assert not should_index_snapshot({"is_discoverable": True, "visibility": "hidden"})
 
 
+def test_snapshot_custom_city_name_in_search_text() -> None:
+    row = {
+        "user_id": "550e8400-e29b-41d4-a716-446655440000",
+        "display_name": "Alex",
+        "headline": "Exploring",
+        "destination_country_iso": None,
+        "destination_city_id": None,
+        "destination_city_name": "Kothavalasa",
+        "current_country_iso": None,
+        "connection_availability": "open",
+        "visibility": "discoverable",
+        "languages": ["en"],
+        "interests": [],
+        "last_active_at": None,
+        "trip_start_date": None,
+        "trip_end_date": None,
+        "geo_lat": None,
+        "geo_lng": None,
+        "is_discoverable": True,
+    }
+    doc = snapshot_to_meili_document(row)
+    assert doc["destination_city"] is None
+    assert "Kothavalasa" in doc["search_text"]
+
+
 def test_build_filter_destination_and_current_country() -> None:
     query = TravelerSearchQuery(
         destination_country="us",
         current_country="gb",
-        city_id="city-uuid",
+        city_id="101",
     )
     filt = build_filter(query)
     assert 'destination_country = "US"' in filt
     assert 'current_country = "GB"' in filt
-    assert 'destination_city = "city-uuid"' in filt
+    assert 'destination_city = "101"' in filt

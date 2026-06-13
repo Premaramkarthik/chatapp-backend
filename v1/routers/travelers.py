@@ -10,6 +10,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
 from core.logging.logger import get_logger, log_info
 from domains.auth.security import hash_secret
+from domains.geo.display import enrich_home_location
 from infrastructure.database.repositories.discovery import PostgresDiscoveryRepository
 from infrastructure.database.repositories.matching import PostgresMatchingRepository
 from infrastructure.database.repositories.travelers import PostgresTravelerRepository
@@ -63,6 +64,7 @@ async def get_traveler_profile(principal: CurrentPrincipal) -> TravelerProfileRe
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
     fields = {k: v for k, v in row.items() if k != "user_id"}
+    fields.update(await enrich_home_location(row))
     return TravelerProfileResponse(user_id=UUID(row["user_id"]), **fields)
 
 
@@ -96,6 +98,7 @@ async def upsert_traveler_profile(
         user_id=user.id,
     )
     fields = {k: v for k, v in row.items() if k != "user_id"}
+    fields.update(await enrich_home_location(row))
     return TravelerProfileResponse(user_id=UUID(row["user_id"]), **fields)
 
 
@@ -144,8 +147,12 @@ async def update_current_location(
     user_id = await _local_user_id(principal)
     row = await PostgresTripRepository().upsert_current_location(
         user_id,
-        country_iso=payload.country_iso,
-        city_id=str(payload.city_id) if payload.city_id else None,
+        country_id=payload.country_id,
+        state_id=payload.state_id,
+        city_id=payload.city_id,
+        custom_country_name=payload.custom_country_name,
+        custom_state_name=payload.custom_state_name,
+        custom_city_name=payload.custom_city_name,
         latitude=payload.latitude,
         longitude=payload.longitude,
     )
@@ -159,7 +166,7 @@ async def search_travelers_route(
     principal: CurrentPrincipal,
     destination_country: str = Query(..., min_length=2, max_length=2),
     q: str = Query(""),
-    city_id: UUID | None = None,
+    city_id: int | None = None,
     current_country: str | None = Query(None, min_length=2, max_length=2),
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
@@ -186,7 +193,7 @@ async def search_travelers_route(
         query = TravelerSearchQuery(
             destination_country=destination_country.upper(),
             q=q,
-            city_id=str(city_id) if city_id else None,
+            city_id=str(city_id) if city_id is not None else None,
             current_country=current_country.upper() if current_country else None,
             limit=limit,
             offset=offset,
@@ -241,7 +248,7 @@ def _snapshot_to_search_result(row: dict) -> TravelerSearchResult:
         display_name=row.get("display_name"),
         headline=row.get("headline"),
         avatar_url=row.get("avatar_url"),
-        destination_country_iso=row["destination_country_iso"],
+        destination_country_iso=row.get("destination_country_iso"),
         destination_city_name=row.get("destination_city_name"),
         current_country_iso=row.get("current_country_iso"),
         languages=list(row.get("languages") or []),

@@ -9,7 +9,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from core.config.settings import settings
-from core.logging.logger import get_logger, log_warning
+from core.logging.logger import get_logger, log_info, log_warning
 from core.observability.prometheus_metrics import AUTH_REDIS_FALLBACK_TOTAL
 
 logger = get_logger(__name__)
@@ -212,3 +212,168 @@ class AuthRedisCache:
 
 
 auth_redis_cache = AuthRedisCache()
+
+
+class GeoRedisCache:
+    """Search-keyed geo autocomplete cache with structured usage logging."""
+
+    def __init__(self, delegate: AuthRedisCache | None = None) -> None:
+        self._delegate = delegate or auth_redis_cache
+        self._logger = get_logger(__name__)
+
+    @staticmethod
+    def search_key(resource: str, *, limit: int, search: str, parent_id: int | None = None) -> str:
+        """Build a stable cache key for autocomplete queries."""
+        import hashlib
+
+        parts = {"limit": limit, "search": search.strip().lower()}
+        if parent_id is not None:
+            if resource == "states":
+                parts["country_id"] = parent_id
+            elif resource == "cities":
+                parts["state_id"] = parent_id
+        normalized = "|".join(f"{k}={v}" for k, v in sorted(parts.items()))
+        digest = hashlib.sha256(normalized.encode()).hexdigest()[:16]
+        if resource == "countries":
+            return f"geo:countries:search:{digest}:v1"
+        if resource == "states":
+            return f"geo:states:country:{parent_id}:search:{digest}:v1"
+        return f"geo:cities:state:{parent_id}:search:{digest}:v1"
+
+    def _log_enabled(self) -> bool:
+        from core.config.settings import settings
+
+        return settings.geo.cache_log_enabled
+
+    async def get_json(self, key: str, *, resource: str) -> list[dict[str, Any]] | None:
+        """Read cached geo search results."""
+        from core.config.settings import settings
+
+        if not settings.geo.cache_enabled:
+            return None
+        prefix = key.rsplit(":", 1)[0] if key.endswith(":v1") else key[:48]
+        used_fallback = False
+        try:
+            client = await self._delegate.client()
+            used_fallback = client is self._delegate._fallback
+            raw = await self._delegate.get_text(key)
+        except Exception as exc:
+            if self._log_enabled():
+                log_warning(
+                    self._logger,
+                    "Geo Redis failed; using in-memory fallback",
+                    operation="get",
+                    error_type=type(exc).__name__,
+                    cache_key_prefix=prefix,
+                    namespace="geo",
+                    resource=resource,
+                )
+            raw = await self._delegate._fallback.get(key)
+            used_fallback = True
+        backend = "memory_fallback" if used_fallback else "redis"
+        if raw is None:
+            if self._log_enabled():
+                log_info(
+                    self._logger,
+                    "Geo cache miss",
+                    backend=backend,
+                    operation="get",
+                    namespace="geo",
+                    resource=resource,
+                    result="miss",
+                    cache_key_prefix=prefix,
+                )
+            return None
+        if self._log_enabled():
+            log_info(
+                self._logger,
+                "Geo cache hit",
+                backend=backend,
+                operation="get",
+                namespace="geo",
+                resource=resource,
+                cache_key_prefix=prefix,
+            )
+        parsed = json.loads(raw)
+        return parsed if isinstance(parsed, list) else None
+
+    async def set_json(
+        self,
+        key: str,
+        value: list[dict[str, Any]],
+        *,
+        resource: str,
+        ttl_sec: int,
+    ) -> None:
+        """Store geo search results."""
+        from core.config.settings import settings
+
+        if not settings.geo.cache_enabled:
+            return
+        prefix = key.rsplit(":", 1)[0] if key.endswith(":v1") else key[:48]
+        used_fallback = False
+        try:
+            client = await self._delegate.client()
+            used_fallback = client is self._delegate._fallback
+            await self._delegate.set_text(key, json.dumps(value, default=str), ttl_sec=ttl_sec)
+        except Exception as exc:
+            if self._log_enabled():
+                log_warning(
+                    self._logger,
+                    "Geo Redis failed; using in-memory fallback",
+                    operation="set",
+                    error_type=type(exc).__name__,
+                    cache_key_prefix=prefix,
+                    namespace="geo",
+                    resource=resource,
+                )
+            await self._delegate._fallback.set(
+                key,
+                json.dumps(value, default=str),
+                ex=ttl_sec,
+            )
+            used_fallback = True
+        if self._log_enabled():
+            log_info(
+                self._logger,
+                "Geo cache stored",
+                backend="memory_fallback" if used_fallback else "redis",
+                operation="set",
+                namespace="geo",
+                resource=resource,
+                ttl_sec=ttl_sec,
+                cache_key_prefix=prefix,
+            )
+
+    async def flush_all(self) -> int:
+        """Delete all geo:* cache keys."""
+        deleted = 0
+        try:
+            client = await self._delegate.client()
+            if hasattr(client, "scan_iter"):
+                keys = [key async for key in client.scan_iter("geo:*", count=200)]
+                if keys:
+                    deleted = int(await client.delete(*keys))
+            else:
+                deleted = await self._delegate._fallback.delete()
+        except Exception as exc:
+            log_warning(
+                self._logger,
+                "Geo Redis failed; using in-memory fallback",
+                operation="flush",
+                error_type=type(exc).__name__,
+                namespace="geo",
+            )
+        if self._log_enabled():
+            log_info(
+                self._logger,
+                "Geo cache flushed",
+                operation="flush",
+                namespace="geo",
+                keys_deleted=deleted,
+                pattern="geo:*",
+            )
+        return deleted
+
+
+geo_redis_cache = GeoRedisCache()

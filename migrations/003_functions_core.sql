@@ -334,3 +334,244 @@ BEGIN
     RAISE EXCEPTION 'fn_users unknown mode: %', mode;
 END;
 $$;
+
+-- fn_geo: read-only geographic reference search and lookup
+--   1=search_countries, 2=search_states, 3=search_cities
+--   4=get_country, 5=get_state, 6=get_city
+CREATE OR REPLACE FUNCTION fn_geo(mode INT, payload JSONB DEFAULT '{}'::jsonb)
+RETURNS JSONB
+LANGUAGE plpgsql
+STABLE
+AS $$
+DECLARE
+    search_term TEXT;
+    pattern TEXT;
+    limit_val INT;
+    country_id_val BIGINT;
+    state_id_val BIGINT;
+    entity_id BIGINT;
+    items JSONB;
+    row_json JSONB;
+BEGIN
+    limit_val := COALESCE((payload->>'limit')::int, 20);
+    IF limit_val < 1 THEN
+        limit_val := 1;
+    END IF;
+
+    search_term := NULLIF(TRIM(payload->>'search'), '');
+    IF search_term IS NOT NULL THEN
+        pattern := '%' || search_term || '%';
+    END IF;
+
+    IF mode = 1 THEN
+        IF pattern IS NOT NULL THEN
+            SELECT COALESCE(
+                jsonb_agg(
+                    jsonb_build_object(
+                        'id', c.id,
+                        'iso2', c.iso2,
+                        'iso3', c.iso3,
+                        'name', c.name,
+                        'phone_code', c.phone_code
+                    )
+                    ORDER BY c.name
+                ),
+                '[]'::jsonb
+            )
+            INTO items
+            FROM (
+                SELECT id, iso2, iso3, name, phone_code
+                FROM geo_countries
+                WHERE name ILIKE pattern
+                   OR iso2 ILIKE pattern
+                   OR iso3 ILIKE pattern
+                ORDER BY name
+                LIMIT limit_val
+            ) c;
+        ELSE
+            SELECT COALESCE(
+                jsonb_agg(
+                    jsonb_build_object(
+                        'id', c.id,
+                        'iso2', c.iso2,
+                        'iso3', c.iso3,
+                        'name', c.name,
+                        'phone_code', c.phone_code
+                    )
+                    ORDER BY c.name
+                ),
+                '[]'::jsonb
+            )
+            INTO items
+            FROM (
+                SELECT id, iso2, iso3, name, phone_code
+                FROM geo_countries
+                ORDER BY name
+                LIMIT limit_val
+            ) c;
+        END IF;
+        RETURN items;
+
+    ELSIF mode = 2 THEN
+        country_id_val := (payload->>'country_id')::bigint;
+        IF country_id_val IS NULL THEN
+            RAISE EXCEPTION 'country_id is required';
+        END IF;
+
+        IF pattern IS NOT NULL THEN
+            SELECT COALESCE(
+                jsonb_agg(
+                    jsonb_build_object(
+                        'id', s.id,
+                        'country_id', s.country_id,
+                        'state_code', s.state_code,
+                        'name', s.name
+                    )
+                    ORDER BY s.name
+                ),
+                '[]'::jsonb
+            )
+            INTO items
+            FROM (
+                SELECT id, country_id, state_code, name
+                FROM geo_states
+                WHERE country_id = country_id_val
+                  AND (name ILIKE pattern OR state_code ILIKE pattern)
+                ORDER BY name
+                LIMIT limit_val
+            ) s;
+        ELSE
+            SELECT COALESCE(
+                jsonb_agg(
+                    jsonb_build_object(
+                        'id', s.id,
+                        'country_id', s.country_id,
+                        'state_code', s.state_code,
+                        'name', s.name
+                    )
+                    ORDER BY s.name
+                ),
+                '[]'::jsonb
+            )
+            INTO items
+            FROM (
+                SELECT id, country_id, state_code, name
+                FROM geo_states
+                WHERE country_id = country_id_val
+                ORDER BY name
+                LIMIT limit_val
+            ) s;
+        END IF;
+        RETURN items;
+
+    ELSIF mode = 3 THEN
+        state_id_val := (payload->>'state_id')::bigint;
+        IF state_id_val IS NULL THEN
+            RAISE EXCEPTION 'state_id is required';
+        END IF;
+
+        IF pattern IS NOT NULL THEN
+            SELECT COALESCE(
+                jsonb_agg(
+                    jsonb_build_object(
+                        'id', c.id,
+                        'country_id', c.country_id,
+                        'state_id', c.state_id,
+                        'name', c.name
+                    )
+                    ORDER BY c.name
+                ),
+                '[]'::jsonb
+            )
+            INTO items
+            FROM (
+                SELECT id, country_id, state_id, name
+                FROM geo_cities
+                WHERE state_id = state_id_val
+                  AND name ILIKE pattern
+                ORDER BY name
+                LIMIT limit_val
+            ) c;
+        ELSE
+            SELECT COALESCE(
+                jsonb_agg(
+                    jsonb_build_object(
+                        'id', c.id,
+                        'country_id', c.country_id,
+                        'state_id', c.state_id,
+                        'name', c.name
+                    )
+                    ORDER BY c.name
+                ),
+                '[]'::jsonb
+            )
+            INTO items
+            FROM (
+                SELECT id, country_id, state_id, name
+                FROM geo_cities
+                WHERE state_id = state_id_val
+                ORDER BY name
+                LIMIT limit_val
+            ) c;
+        END IF;
+        RETURN items;
+
+    ELSIF mode = 4 THEN
+        entity_id := (payload->>'country_id')::bigint;
+        IF entity_id IS NULL THEN
+            RAISE EXCEPTION 'country_id is required';
+        END IF;
+
+        SELECT jsonb_build_object(
+            'id', id,
+            'iso2', iso2,
+            'iso3', iso3,
+            'name', name,
+            'phone_code', phone_code
+        )
+        INTO row_json
+        FROM geo_countries
+        WHERE id = entity_id;
+
+        RETURN row_json;
+
+    ELSIF mode = 5 THEN
+        entity_id := (payload->>'state_id')::bigint;
+        IF entity_id IS NULL THEN
+            RAISE EXCEPTION 'state_id is required';
+        END IF;
+
+        SELECT jsonb_build_object(
+            'id', id,
+            'country_id', country_id,
+            'state_code', state_code,
+            'name', name
+        )
+        INTO row_json
+        FROM geo_states
+        WHERE id = entity_id;
+
+        RETURN row_json;
+
+    ELSIF mode = 6 THEN
+        entity_id := (payload->>'city_id')::bigint;
+        IF entity_id IS NULL THEN
+            RAISE EXCEPTION 'city_id is required';
+        END IF;
+
+        SELECT jsonb_build_object(
+            'id', id,
+            'country_id', country_id,
+            'state_id', state_id,
+            'name', name
+        )
+        INTO row_json
+        FROM geo_cities
+        WHERE id = entity_id;
+
+        RETURN row_json;
+    END IF;
+
+    RAISE EXCEPTION 'fn_geo unknown mode: %', mode;
+END;
+$$;

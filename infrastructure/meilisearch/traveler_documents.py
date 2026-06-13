@@ -41,8 +41,9 @@ def snapshot_to_meili_document(row: dict[str, Any]) -> dict[str, Any]:
         "destination_country": row.get("destination_country_iso"),
         "current_country": row.get("current_country_iso"),
         "destination_city": (
-            str(row["destination_city_id"]) if row.get("destination_city_id") else None
+            str(row["destination_city_id"]) if row.get("destination_city_id") is not None else None
         ),
+        "destination_city_name": row.get("destination_city_name"),
         "availability": row.get("connection_availability"),
         "visibility": row.get("visibility"),
         "languages": languages,
