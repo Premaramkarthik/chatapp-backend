@@ -56,22 +56,6 @@ class KeycloakAuthClient:
         query = urlencode(params)
         return f"{settings.keycloak.authorization_endpoint}?{query}"
 
-    def logout_url(
-        self,
-        *,
-        id_token_hint: str | None,
-        post_logout_redirect_uri: str | None = None,
-    ) -> str:
-        """Build a browser RP-initiated logout URL."""
-        params = {
-            "client_id": settings.keycloak.web_client_id,
-            "post_logout_redirect_uri": post_logout_redirect_uri
-            or settings.auth.post_logout_redirect_url,
-        }
-        if id_token_hint:
-            params["id_token_hint"] = id_token_hint
-        return f"{settings.keycloak.logout_endpoint}?{urlencode(params)}"
-
     async def exchange_code(
         self,
         *,

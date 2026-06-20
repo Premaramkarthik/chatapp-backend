@@ -397,9 +397,17 @@ Geo pickers on the frontend load reference data from `/v1/geo/*` and send numeri
 
 ---
 
-## Connector profiles (backend only)
+## Connector profiles
 
-`PostgresExplorerRepository` also implements `get_connector_profile` / upsert via `fn_connector_profiles`. There is **no** `/v1/connectors/profile` router in the current codebase. Connector home/search preferences are intended to be exposed in a future API mirroring the explorer pattern.
+`GET/PUT /v1/connectors/profile` mirror the explorer profile pattern for users with `account_mode: connector`.
+
+| Field | Notes |
+| --- | --- |
+| `bio` | Optional short introduction |
+| Home location | Same six-column pattern as explorer (`home_*` / `custom_home_*`) |
+| `preferred_destination_countries` | ISO2 array |
+
+`last_search_*` fields are updated by search flows, not the profile PUT endpoint.
 
 ---
 

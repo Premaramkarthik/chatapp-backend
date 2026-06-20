@@ -174,7 +174,17 @@ BEGIN
         WHERE keycloak_sub = payload->>'keycloak_sub'
         RETURNING * INTO result;
 
-        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
+        IF result.id IS NULL THEN
+            RETURN NULL;
+        END IF;
+
+        IF payload->>'account_mode' NOT IN ('explorer', 'connector') THEN
+            RAISE EXCEPTION 'invalid account_mode';
+        END IF;
+
+        PERFORM social_bootstrap_role_context(result.id, payload->>'account_mode');
+
+        RETURN to_jsonb(result);
 
     ELSIF mode = 6 THEN
         SELECT * INTO result

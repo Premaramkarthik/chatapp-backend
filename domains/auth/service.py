@@ -291,6 +291,13 @@ class AuthService:
             cookie_max_age_sec=_cookie_max_age(remember_me),
         )
 
+    async def sync_display_name(self, *, keycloak_sub: str, display_name: str) -> None:
+        """Push an updated display name to Keycloak."""
+        await self._keycloak.update_user_profile(
+            user_id=keycloak_sub,
+            display_name=display_name,
+        )
+
     async def complete_onboarding(
         self,
         *,
@@ -990,8 +997,8 @@ class AuthService:
         *,
         session: AuthSession,
         request: Request,
-    ) -> str:
-        """Revoke one local BFF session and return a Keycloak logout URL."""
+    ) -> None:
+        """Revoke the current BFF session and terminate Keycloak SSO server-side."""
         request_id = request_id_from(request)
         log_info(
             logger,
@@ -1005,6 +1012,7 @@ class AuthService:
             user_id=session.user_id,
         )
         await mark_session_revoked(session.session_hash)
+        await self._terminate_keycloak_sessions(session.keycloak_sub, request_id=request_id)
         await self._record_event(
             AuthSecurityEventType.LOGOUT_SUCCEEDED,
             request=request,
@@ -1019,11 +1027,23 @@ class AuthService:
             session_id=session.id,
             user_id=session.user_id,
         )
-        id_token = self._cipher.decrypt(session.id_token_encrypted)
-        return self._keycloak.logout_url(
-            id_token_hint=id_token,
-            post_logout_redirect_uri=settings.auth.post_logout_redirect_url,
-        )
+
+    async def _terminate_keycloak_sessions(
+        self,
+        keycloak_sub: str,
+        *,
+        request_id: str,
+    ) -> None:
+        """End Keycloak SSO sessions via admin API (no browser redirect)."""
+        try:
+            await self._keycloak.logout_user_sessions(user_id=keycloak_sub)
+        except Exception:
+            log_exception(
+                logger,
+                "Keycloak session termination failed during logout",
+                request_id=request_id,
+                keycloak_sub=keycloak_sub,
+            )
 
     async def forgot_password(self, *, email: str, request: Request) -> None:
         """Send an app-owned password reset email with a generic external response."""

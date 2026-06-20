@@ -328,6 +328,26 @@ CREATE TABLE IF NOT EXISTS search_outbox_events (
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS user_reports (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    reporter_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reported_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    reason TEXT NOT NULL,
+    description TEXT,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    type TEXT NOT NULL,
+    payload JSONB NOT NULL DEFAULT '{}',
+    read_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
 -- Indexes
 CREATE INDEX IF NOT EXISTS idx_users_status ON users(status);
 CREATE INDEX IF NOT EXISTS idx_users_account_mode ON users(account_mode);
@@ -418,6 +438,16 @@ CREATE INDEX IF NOT EXISTS idx_tinode_conversation_mappings_topic
 CREATE INDEX IF NOT EXISTS idx_search_outbox_pending
     ON search_outbox_events(scheduled_at)
     WHERE status = 'pending';
+
+CREATE INDEX IF NOT EXISTS idx_user_reports_reporter ON user_reports(reporter_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_reports_reported ON user_reports(reported_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_reports_status ON user_reports(status);
+
+CREATE INDEX IF NOT EXISTS idx_notifications_user_unread
+    ON notifications(user_id, created_at DESC)
+    WHERE read_at IS NULL;
+CREATE INDEX IF NOT EXISTS idx_notifications_user_created
+    ON notifications(user_id, created_at DESC);
 
 -- Table constraints (idempotent add)
 DO $$
@@ -581,6 +611,30 @@ BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'search_outbox_events_status_check') THEN
         ALTER TABLE search_outbox_events ADD CONSTRAINT search_outbox_events_status_check CHECK (
             status IN ('pending', 'processing', 'completed', 'failed')
+        );
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_reports_no_self') THEN
+        ALTER TABLE user_reports ADD CONSTRAINT user_reports_no_self CHECK (
+            reporter_id <> reported_id
+        );
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'user_reports_status_check') THEN
+        ALTER TABLE user_reports ADD CONSTRAINT user_reports_status_check CHECK (
+            status IN ('open', 'reviewing', 'resolved', 'dismissed')
+        );
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'notifications_type_check') THEN
+        ALTER TABLE notifications ADD CONSTRAINT notifications_type_check CHECK (
+            type IN (
+                'connection_request',
+                'connection_accepted',
+                'new_message',
+                'trip_match',
+                'system'
+            )
         );
     END IF;
 END;

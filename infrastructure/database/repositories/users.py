@@ -45,6 +45,18 @@ class PostgresUserRepository(UserRepository):
         )
         return User.from_mapping(row)
 
+    async def update_display_name(self, *, user_id: str, display_name: str) -> User | None:
+        """Update display name for an existing user."""
+        row = await call_json_function(
+            "fn_users",
+            4,
+            {
+                "user_id": user_id,
+                "display_name": display_name,
+            },
+        )
+        return None if row is None else User.from_mapping(row)
+
     async def get_by_email(self, email: str) -> User | None:
         """Return a local user by normalized email."""
         row = await call_json_function("fn_users", 6, {"email": email})

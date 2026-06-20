@@ -53,27 +53,29 @@ Every handler resolves the Keycloak subject (`principal.sub`) to a row in `users
 
 ### Account mode
 
-Profile read/write enforces explorer account mode:
+Profile, trip, location, and privacy routes require `account_mode=explorer`. Search requires `account_mode=connector`.
 
 
-| `users.account_mode` | `GET/PUT /profile`                                          |
-| -------------------- | ----------------------------------------------------------- |
-| `explorer`           | Allowed                                                     |
-| `connector`          | **403** — `Explorer profile requires account_mode explorer` |
+| `users.account_mode` | Explorer routes (`/profile`, `/trips`, `/location`, `/privacy`) | `GET /search` | Connector `/v1/connectors/profile` |
+| -------------------- | --------------------------------------------------------------- | ------------- | ---------------------------------- |
+| `explorer`           | Allowed (with capability where noted)                           | **403**       | **403**                            |
+| `connector`          | **403**                                                         | Allowed       | Allowed                            |
 
 
-Set account mode via `PATCH /v1/users/account-mode` after onboarding.
+Set account mode via `PATCH /v1/users/account-mode` after onboarding. The update bootstraps the required profile row in the same database transaction.
 
 ### Capabilities (Keycloak client roles)
 
 
-| Endpoint        | Required capability | Notes                                 |
-| --------------- | ------------------- | ------------------------------------- |
-| `GET /profile`  | Authenticated only  | No capability gate                    |
-| `PUT /profile`  | `trip:create`       | Also requires `account_mode=explorer` |
-| `POST /trips`   | `trip:create`       |                                       |
-| `PUT /location` | `trip:create`       |                                       |
-| `GET /search`   | `trip:join`         | Typical for connector role            |
+| Endpoint        | Required capability | Account mode | Notes                                 |
+| --------------- | ------------------- | ------------ | ------------------------------------- |
+| `GET /profile`  | Authenticated only  | `explorer`   |                                       |
+| `PUT /profile`  | `trip:create`       | `explorer`   |                                       |
+| `GET /privacy`  | Authenticated only  | `explorer`   |                                       |
+| `PUT /privacy`  | `trip:create`       | `explorer`   |                                       |
+| `POST /trips`   | `trip:create`       | `explorer`   |                                       |
+| `PUT /location` | `trip:create`       | `explorer`   |                                       |
+| `GET /search`   | `trip:join`         | `connector`  | Typical for connector role            |
 
 
 Users with the `admin` role bypass capability checks.

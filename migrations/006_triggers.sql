@@ -53,6 +53,12 @@ BEFORE UPDATE ON connection_requests
 FOR EACH ROW
 EXECUTE FUNCTION set_updated_at();
 
+DROP TRIGGER IF EXISTS trg_user_reports_set_updated_at ON user_reports;
+CREATE TRIGGER trg_user_reports_set_updated_at
+BEFORE UPDATE ON user_reports
+FOR EACH ROW
+EXECUTE FUNCTION set_updated_at();
+
 DROP TRIGGER IF EXISTS trg_tinode_conversation_mappings_set_updated_at ON tinode_conversation_mappings;
 CREATE TRIGGER trg_tinode_conversation_mappings_set_updated_at
 BEFORE UPDATE ON tinode_conversation_mappings

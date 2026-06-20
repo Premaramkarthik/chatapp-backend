@@ -2,19 +2,20 @@
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from core.logging.logger import get_logger, log_info
 from domains.auth import AuthService
 from domains.users.bootstrap import BootstrapUser
 from domains.users.user import BootstrapUserCommand
 from infrastructure.database.repositories import PostgresUserRepository
-from infrastructure.database.repositories.explorers import PostgresExplorerRepository
+from infrastructure.database.repositories.discovery import PostgresDiscoveryRepository
 from v1.dependencies.auth import get_current_principal, require_capability
 from v1.dependencies.container import get_auth_service, get_bootstrap_user_use_case
 from v1.schemas.principal import KeycloakPrincipal
-from v1.schemas.users import AccountModeUpdateRequest, UserResponse
+from v1.schemas.users import AccountModeUpdateRequest, DisplayNameUpdateRequest, UserResponse
 from v1.utils.request_context import request_id_from
+from v1.utils.user_session import build_user_response
 
 logger = get_logger(__name__)
 
@@ -46,10 +47,6 @@ async def update_account_mode(
         keycloak_sub=principal.sub,
         account_mode=payload.account_mode,
     )
-    if payload.account_mode == "explorer":
-        await PostgresExplorerRepository().upsert_explorer_profile(user.id)
-    elif payload.account_mode == "connector":
-        await PostgresExplorerRepository().upsert_connector_profile(user.id)
     log_info(
         logger,
         "User account mode updated",
@@ -57,7 +54,47 @@ async def update_account_mode(
         user_id=user.id,
         account_mode=payload.account_mode,
     )
-    return user.to_dict()
+    return await build_user_response(user)
+
+
+@router.patch("/display-name", response_model=UserResponse)
+async def update_display_name(
+    request: Request,
+    payload: DisplayNameUpdateRequest,
+    principal: CurrentPrincipal,
+    bootstrap_user: BootstrapUserUseCase,
+    auth_service: AuthServiceDependency,
+) -> dict:
+    """Update the authenticated user's display name."""
+    display_name = principal.display_name or principal.preferred_username
+    bootstrapped = await bootstrap_user.execute(
+        BootstrapUserCommand(
+            keycloak_sub=principal.sub,
+            email=principal.email,
+            display_name=display_name,
+        ),
+        request_id=request_id_from(request),
+    )
+    user_repo = PostgresUserRepository()
+    updated = await user_repo.update_display_name(
+        user_id=bootstrapped.id,
+        display_name=payload.display_name,
+    )
+    if updated is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    await auth_service.sync_display_name(
+        keycloak_sub=principal.sub,
+        display_name=payload.display_name,
+    )
+    if updated.account_mode == "explorer":
+        await PostgresDiscoveryRepository().rebuild_snapshot(updated.id)
+    log_info(
+        logger,
+        "User display name updated",
+        request_id=request_id_from(request),
+        user_id=updated.id,
+    )
+    return await build_user_response(updated)
 
 
 @router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)

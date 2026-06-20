@@ -14,11 +14,12 @@ from domains.geo.display import enrich_home_location
 from infrastructure.database.repositories.discovery import PostgresDiscoveryRepository
 from infrastructure.database.repositories.explorers import PostgresExplorerRepository
 from infrastructure.database.repositories.matching import PostgresMatchingRepository
+from infrastructure.database.repositories.privacy import PostgresPrivacyRepository
 from infrastructure.database.repositories.trips import PostgresTripRepository
-from infrastructure.database.repositories.users import PostgresUserRepository
 from infrastructure.meilisearch.client import get_meilisearch_client
 from infrastructure.meilisearch.explorer_search import ExplorerSearchQuery, search_explorers
-from v1.dependencies.auth import get_current_principal, require_capability
+from v1.dependencies.account_mode import ConnectorUser, ExplorerUser
+from v1.dependencies.auth import require_capability
 from v1.schemas.explorers import (
     CurrentLocationUpdateRequest,
     ExplorerProfileResponse,
@@ -28,38 +29,19 @@ from v1.schemas.explorers import (
     TravelPlanCreateRequest,
 )
 from v1.schemas.principal import KeycloakPrincipal
+from v1.schemas.privacy import PrivacySettingsResponse, PrivacySettingsUpdateRequest
 from v1.utils.request_context import request_id_from
 
 logger = get_logger(__name__)
 
 router = APIRouter(prefix="/v1/explorers", tags=["explorers"])
-CurrentPrincipal = Annotated[KeycloakPrincipal, Depends(get_current_principal)]
 TripCreator = Annotated[KeycloakPrincipal, Depends(require_capability("trip:create"))]
 TripSearcher = Annotated[KeycloakPrincipal, Depends(require_capability("trip:join"))]
 
 
-async def _local_user_id(principal: KeycloakPrincipal) -> str:
-    user = await PostgresUserRepository().get_by_keycloak_sub(principal.sub)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    return user.id
-
-
-def _require_explorer_mode(account_mode: str | None) -> None:
-    if account_mode != "explorer":
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Explorer profile requires account_mode explorer",
-        )
-
-
 @router.get("/profile", response_model=ExplorerProfileResponse)
-async def get_explorer_profile(principal: CurrentPrincipal) -> ExplorerProfileResponse:
+async def get_explorer_profile(user: ExplorerUser) -> ExplorerProfileResponse:
     """Return the authenticated user's explorer profile."""
-    user = await PostgresUserRepository().get_by_keycloak_sub(principal.sub)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    _require_explorer_mode(user.account_mode)
     row = await PostgresExplorerRepository().get_explorer_profile(user.id)
     if row is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Profile not found")
@@ -72,14 +54,11 @@ async def get_explorer_profile(principal: CurrentPrincipal) -> ExplorerProfileRe
 async def upsert_explorer_profile(
     request: Request,
     payload: ExplorerProfileUpdateRequest,
-    principal: CurrentPrincipal,
+    _: TripCreator,
+    user: ExplorerUser,
 ) -> ExplorerProfileResponse:
     """Create or update explorer profile and rebuild discovery snapshot."""
     request_id = request_id_from(request)
-    user = await PostgresUserRepository().get_by_keycloak_sub(principal.sub)
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
-    _require_explorer_mode(user.account_mode)
     log_info(
         logger,
         "Explorer profile upsert request received",
@@ -101,25 +80,49 @@ async def upsert_explorer_profile(
     return ExplorerProfileResponse(user_id=UUID(row["user_id"]), **fields)
 
 
+@router.get("/privacy", response_model=PrivacySettingsResponse)
+async def get_privacy_settings(user: ExplorerUser) -> PrivacySettingsResponse:
+    """Return explorer privacy settings."""
+    row = await PostgresPrivacyRepository().get_privacy_settings(user.id)
+    if row is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Privacy settings not found"
+        )
+    return PrivacySettingsResponse(**row)
+
+
+@router.put("/privacy", response_model=PrivacySettingsResponse)
+async def upsert_privacy_settings(
+    payload: PrivacySettingsUpdateRequest,
+    _: TripCreator,
+    user: ExplorerUser,
+) -> PrivacySettingsResponse:
+    """Update explorer privacy settings."""
+    row = await PostgresPrivacyRepository().upsert_privacy_settings(
+        user.id,
+        **payload.model_dump(exclude_unset=True),
+    )
+    return PrivacySettingsResponse(**row)
+
+
 @router.post("/trips", status_code=status.HTTP_201_CREATED)
 async def create_travel_plan(
     request: Request,
     payload: TravelPlanCreateRequest,
     _: TripCreator,
-    principal: CurrentPrincipal,
+    user: ExplorerUser,
 ) -> dict:
     """Create a travel plan with destinations."""
     request_id = request_id_from(request)
-    user_id = await _local_user_id(principal)
     log_info(
         logger,
         "Travel plan create request received",
         request_id=request_id,
-        user_id=user_id,
+        user_id=user.id,
         title=payload.title,
     )
     plan = await PostgresTripRepository().create_travel_plan(
-        user_id,
+        user.id,
         title=payload.title,
         start_date=payload.start_date,
         end_date=payload.end_date,
@@ -130,7 +133,7 @@ async def create_travel_plan(
         logger,
         "Travel plan created",
         request_id=request_id,
-        user_id=user_id,
+        user_id=user.id,
         plan_id=plan.get("id"),
     )
     return {"plan": dict(plan)}
@@ -140,12 +143,11 @@ async def create_travel_plan(
 async def update_current_location(
     payload: CurrentLocationUpdateRequest,
     _: TripCreator,
-    principal: CurrentPrincipal,
+    user: ExplorerUser,
 ) -> dict:
     """Update explorer current location."""
-    user_id = await _local_user_id(principal)
     row = await PostgresTripRepository().upsert_current_location(
-        user_id,
+        user.id,
         country_id=payload.country_id,
         state_id=payload.state_id,
         city_id=payload.city_id,
@@ -162,7 +164,7 @@ async def update_current_location(
 async def search_explorers_route(
     request: Request,
     _: TripSearcher,
-    principal: CurrentPrincipal,
+    user: ConnectorUser,
     destination_country: str = Query(..., min_length=2, max_length=2),
     q: str = Query(""),
     city_id: int | None = None,
@@ -175,7 +177,7 @@ async def search_explorers_route(
 
     request_id = request_id_from(request)
     query_hash = hash_secret(f"{destination_country}:{q}:{city_id}:{current_country}")[:16]
-    viewer_id = await _local_user_id(principal)
+    viewer_id = user.id
     log_info(
         logger,
         "Explorer search request received",
@@ -210,12 +212,12 @@ async def search_explorers_route(
         rows = await discovery.fetch_public_by_ids(ids)
         row_by_id = {str(row["user_id"]): row for row in rows}
         for item in meili_hits:
-            user_id = str(item["id"])
-            if user_id == viewer_id:
+            hit_user_id = str(item["id"])
+            if hit_user_id == viewer_id:
                 continue
-            if await PostgresMatchingRepository().is_blocked(viewer_id, user_id):
+            if await PostgresMatchingRepository().is_blocked(viewer_id, hit_user_id):
                 continue
-            row = row_by_id.get(user_id)
+            row = row_by_id.get(hit_user_id)
             if row is None:
                 continue
             hits.append(_snapshot_to_search_result(row))

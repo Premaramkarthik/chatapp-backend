@@ -96,12 +96,11 @@ def test_update_account_mode_without_profile_capability(
                 updated_at=now,
             )
 
-    class FakeExplorerRepository:
-        async def upsert_explorer_profile(self, user_id: str, **_: object) -> dict:
-            return {"user_id": user_id}
-
-        async def upsert_connector_profile(self, user_id: str, **_: object) -> dict:
-            return {"user_id": user_id}
+    async def fake_build_user_response(user: User) -> dict:
+        payload = user.to_dict()
+        payload["onboarding_complete"] = user.onboarding_completed_at is not None
+        payload["profile_exists"] = user.account_mode is not None
+        return payload
 
     monkeypatch.setattr(
         "v1.middleware.authentication.settings.middleware.auth_enabled",
@@ -118,7 +117,7 @@ def test_update_account_mode_without_profile_capability(
     )
     app.dependency_overrides[get_bootstrap_user_use_case] = lambda: FakeBootstrapUser()
     monkeypatch.setattr("v1.routers.users.PostgresUserRepository", FakeUserRepository)
-    monkeypatch.setattr("v1.routers.users.PostgresExplorerRepository", FakeExplorerRepository)
+    monkeypatch.setattr("v1.routers.users.build_user_response", fake_build_user_response)
     try:
         with TestClient(app) as client:
             response = client.patch(
@@ -131,6 +130,122 @@ def test_update_account_mode_without_profile_capability(
     assert response.status_code == 200
     assert updated_mode == "connector"
     assert response.json()["account_mode"] == "connector"
+
+
+def test_update_display_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Authenticated users can update display name."""
+    updated_name: str | None = None
+    keycloak_sync: dict[str, str] | None = None
+    snapshot_rebuilt_for: str | None = None
+
+    class FakeUserRepository:
+        async def update_display_name(self, *, user_id: str, display_name: str) -> User:
+            nonlocal updated_name
+            updated_name = display_name
+            now = datetime(2026, 1, 1, tzinfo=UTC)
+            return User(
+                id=user_id,
+                keycloak_sub="google-sub-123",
+                email="user@example.com",
+                display_name=display_name,
+                status="active",
+                account_mode="explorer",
+                email_verified=True,
+                created_via="google",
+                created_at=now,
+                updated_at=now,
+            )
+
+    class FakeDiscoveryRepository:
+        async def rebuild_snapshot(self, user_id: str) -> dict:
+            nonlocal snapshot_rebuilt_for
+            snapshot_rebuilt_for = user_id
+            return {}
+
+    class FakeAuthService:
+        async def sync_display_name(self, *, keycloak_sub: str, display_name: str) -> None:
+            nonlocal keycloak_sync
+            keycloak_sync = {"keycloak_sub": keycloak_sub, "display_name": display_name}
+
+    async def fake_build_user_response(user: User) -> dict:
+        payload = user.to_dict()
+        payload["onboarding_complete"] = user.onboarding_completed_at is not None
+        payload["profile_exists"] = user.account_mode is not None
+        return payload
+
+    monkeypatch.setattr(
+        "v1.middleware.authentication.settings.middleware.auth_enabled",
+        False,
+    )
+    app.dependency_overrides[get_current_principal] = lambda: KeycloakPrincipal(
+        sub="google-sub-123",
+        email="user@example.com",
+        email_verified=True,
+        display_name="Google User",
+        preferred_username="user@example.com",
+        identity_provider="google",
+        roles=[],
+    )
+    app.dependency_overrides[get_bootstrap_user_use_case] = lambda: FakeBootstrapUser()
+    app.dependency_overrides[get_auth_service] = lambda: FakeAuthService()
+    monkeypatch.setattr("v1.routers.users.PostgresUserRepository", FakeUserRepository)
+    monkeypatch.setattr("v1.routers.users.PostgresDiscoveryRepository", FakeDiscoveryRepository)
+    monkeypatch.setattr("v1.routers.users.build_user_response", fake_build_user_response)
+    try:
+        with TestClient(app) as client:
+            response = client.patch(
+                "/v1/users/display-name",
+                json={"display_name": "New Name"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 200
+    assert updated_name == "New Name"
+    assert response.json()["display_name"] == "New Name"
+    assert keycloak_sync == {"keycloak_sub": "google-sub-123", "display_name": "New Name"}
+    assert snapshot_rebuilt_for is not None
+
+
+def test_update_display_name_rejects_short_name(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Display name must be at least two characters after normalization."""
+    monkeypatch.setattr(
+        "v1.middleware.authentication.settings.middleware.auth_enabled",
+        False,
+    )
+    app.dependency_overrides[get_current_principal] = _fake_principal
+    try:
+        with TestClient(app) as client:
+            response = client.patch(
+                "/v1/users/display-name",
+                json={"display_name": "A"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 422
+
+
+def test_update_display_name_requires_auth(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unauthenticated requests are rejected."""
+    monkeypatch.setattr(
+        "v1.middleware.authentication.settings.middleware.auth_enabled",
+        True,
+    )
+    try:
+        with TestClient(app) as client:
+            response = client.patch(
+                "/v1/users/display-name",
+                json={"display_name": "Valid Name"},
+            )
+    finally:
+        app.dependency_overrides.clear()
+
+    assert response.status_code == 401
 
 
 def test_delete_my_account_returns_204(

@@ -175,10 +175,10 @@ class SignupCompleteResponse(BaseModel):
     next_step: str = "verify_email"
 
 
-class LogoutResponse(BaseModel):
-    """Logout response."""
+class RevokeAllSessionsResponse(BaseModel):
+    """Count of revoked sessions."""
 
-    logout_url: str
+    revoked_count: int
 
 
 class SessionResponse(BaseModel):
@@ -196,9 +196,3 @@ class RevokeAllSessionsRequest(BaseModel):
     """Request to revoke all sessions."""
 
     keep_current: bool = Field(default=True)
-
-
-class RevokeAllSessionsResponse(BaseModel):
-    """Count of revoked sessions."""
-
-    revoked_count: int

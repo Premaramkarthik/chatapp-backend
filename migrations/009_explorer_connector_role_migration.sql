@@ -277,7 +277,17 @@ BEGIN
         WHERE keycloak_sub = payload->>'keycloak_sub'
         RETURNING * INTO result;
 
-        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
+        IF result.id IS NULL THEN
+            RETURN NULL;
+        END IF;
+
+        IF payload->>'account_mode' NOT IN ('explorer', 'connector') THEN
+            RAISE EXCEPTION 'invalid account_mode';
+        END IF;
+
+        PERFORM social_bootstrap_role_context(result.id, payload->>'account_mode');
+
+        RETURN to_jsonb(result);
 
     ELSIF mode = 6 THEN
         SELECT * INTO result
@@ -935,6 +945,42 @@ BEGIN
 END;
 $$;
 
+CREATE OR REPLACE FUNCTION social_bootstrap_role_context(
+    p_user_id UUID,
+    p_account_mode TEXT
+)
+RETURNS VOID
+LANGUAGE plpgsql
+AS $$
+BEGIN
+    IF p_account_mode = 'explorer' THEN
+        INSERT INTO user_privacy_settings (user_id)
+        VALUES (p_user_id)
+        ON CONFLICT (user_id) DO NOTHING;
+
+        INSERT INTO explorer_profiles (
+            user_id,
+            connection_availability,
+            visibility,
+            last_active_at
+        )
+        VALUES (p_user_id, 'open', 'discoverable', now())
+        ON CONFLICT (user_id) DO NOTHING;
+
+    ELSIF p_account_mode = 'connector' THEN
+        INSERT INTO connector_profiles (
+            user_id,
+            preferred_destination_countries
+        )
+        VALUES (p_user_id, '{}'::char(2)[])
+        ON CONFLICT (user_id) DO NOTHING;
+
+    ELSE
+        RAISE EXCEPTION 'invalid account_mode for bootstrap: %', p_account_mode;
+    END IF;
+END;
+$$;
+
 -- fn_explorer_profiles: 1=get, 2=upsert+rebuild
 CREATE OR REPLACE FUNCTION fn_explorer_profiles(mode INT, payload JSONB DEFAULT '{}'::jsonb)
 RETURNS JSONB
@@ -1451,7 +1497,7 @@ BEGIN
 END;
 $$;
 
--- fn_connection_requests: 1=create, 2=get, 3=list_incoming, 4=accept, 5=reject
+-- fn_connection_requests: 1=create, 2=get, 3=list_incoming, 4=accept, 5=reject, 6=cancel, 7=list_outgoing
 CREATE OR REPLACE FUNCTION fn_connection_requests(mode INT, payload JSONB DEFAULT '{}'::jsonb)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -1580,13 +1626,37 @@ BEGIN
             RAISE EXCEPTION 'not_found';
         END IF;
         RETURN to_jsonb(req);
+
+    ELSIF mode = 6 THEN
+        rid := (payload->>'request_id')::uuid;
+
+        UPDATE connection_requests
+        SET status = 'cancelled', updated_at = now()
+        WHERE id = rid
+          AND requester_id = (payload->>'requester_id')::uuid
+          AND status = 'pending'
+        RETURNING * INTO req;
+
+        IF req.id IS NULL THEN
+            RAISE EXCEPTION 'not_found';
+        END IF;
+        RETURN to_jsonb(req);
+
+    ELSIF mode = 7 THEN
+        SELECT COALESCE(jsonb_agg(to_jsonb(cr) ORDER BY cr.created_at DESC), '[]'::jsonb)
+        INTO arr
+        FROM connection_requests cr
+        WHERE cr.requester_id = (payload->>'requester_id')::uuid
+          AND cr.status = 'pending';
+
+        RETURN arr;
     END IF;
 
     RAISE EXCEPTION 'fn_connection_requests unknown mode: %', mode;
 END;
 $$;
 
--- fn_user_connections: 1=get_by_id, 2=get_between
+-- fn_user_connections: 1=get_by_id, 2=get_between, 3=list_active, 4=remove
 CREATE OR REPLACE FUNCTION fn_user_connections(mode INT, payload JSONB DEFAULT '{}'::jsonb)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -1594,6 +1664,8 @@ AS $$
 DECLARE
     result user_connections%ROWTYPE;
     pair RECORD;
+    arr JSONB;
+    uid UUID;
 BEGIN
     IF mode = 1 THEN
         SELECT * INTO result
@@ -1616,13 +1688,39 @@ BEGIN
           AND status = 'active';
 
         RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
+
+    ELSIF mode = 3 THEN
+        uid := (payload->>'user_id')::uuid;
+
+        SELECT COALESCE(jsonb_agg(to_jsonb(uc) ORDER BY uc.connected_at DESC), '[]'::jsonb)
+        INTO arr
+        FROM user_connections uc
+        WHERE (uc.user_a_id = uid OR uc.user_b_id = uid)
+          AND uc.status = 'active';
+
+        RETURN arr;
+
+    ELSIF mode = 4 THEN
+        uid := (payload->>'user_id')::uuid;
+
+        UPDATE user_connections
+        SET status = 'removed'
+        WHERE id = (payload->>'connection_id')::uuid
+          AND status = 'active'
+          AND (user_a_id = uid OR user_b_id = uid)
+        RETURNING * INTO result;
+
+        IF result.id IS NULL THEN
+            RAISE EXCEPTION 'not_found';
+        END IF;
+        RETURN to_jsonb(result);
     END IF;
 
     RAISE EXCEPTION 'fn_user_connections unknown mode: %', mode;
 END;
 $$;
 
--- fn_user_blocks: 1=is_blocked, 2=create
+-- fn_user_blocks: 1=is_blocked, 2=create, 3=list, 4=delete
 CREATE OR REPLACE FUNCTION fn_user_blocks(mode INT, payload JSONB DEFAULT '{}'::jsonb)
 RETURNS JSONB
 LANGUAGE plpgsql
@@ -1630,6 +1728,7 @@ AS $$
 DECLARE
     result user_blocks%ROWTYPE;
     blocked BOOLEAN;
+    arr JSONB;
 BEGIN
     IF mode = 1 THEN
         SELECT EXISTS (
@@ -1653,14 +1752,122 @@ BEGIN
         RETURNING * INTO result;
 
         RETURN to_jsonb(result);
+
+    ELSIF mode = 3 THEN
+        SELECT COALESCE(jsonb_agg(to_jsonb(b) ORDER BY b.created_at DESC), '[]'::jsonb)
+        INTO arr
+        FROM user_blocks b
+        WHERE b.blocker_id = (payload->>'blocker_id')::uuid;
+
+        RETURN arr;
+
+    ELSIF mode = 4 THEN
+        DELETE FROM user_blocks
+        WHERE blocker_id = (payload->>'blocker_id')::uuid
+          AND blocked_id = (payload->>'blocked_id')::uuid
+        RETURNING * INTO result;
+
+        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
     END IF;
 
     RAISE EXCEPTION 'fn_user_blocks unknown mode: %', mode;
 END;
 $$;
 
+-- fn_user_reports: 1=create, 2=list_for_reporter
+CREATE OR REPLACE FUNCTION fn_user_reports(mode INT, payload JSONB DEFAULT '{}'::jsonb)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    result user_reports%ROWTYPE;
+    arr JSONB;
+BEGIN
+    IF mode = 1 THEN
+        IF (payload->>'reporter_id')::uuid = (payload->>'reported_id')::uuid THEN
+            RAISE EXCEPTION 'cannot_report_self';
+        END IF;
+
+        INSERT INTO user_reports (
+            reporter_id,
+            reported_id,
+            reason,
+            description,
+            status
+        )
+        VALUES (
+            (payload->>'reporter_id')::uuid,
+            (payload->>'reported_id')::uuid,
+            payload->>'reason',
+            NULLIF(payload->>'description', ''),
+            'open'
+        )
+        RETURNING * INTO result;
+
+        RETURN to_jsonb(result);
+
+    ELSIF mode = 2 THEN
+        SELECT COALESCE(jsonb_agg(to_jsonb(r) ORDER BY r.created_at DESC), '[]'::jsonb)
+        INTO arr
+        FROM user_reports r
+        WHERE r.reporter_id = (payload->>'reporter_id')::uuid;
+
+        RETURN arr;
+    END IF;
+
+    RAISE EXCEPTION 'fn_user_reports unknown mode: %', mode;
+END;
+$$;
+
+-- fn_notifications: 1=create, 2=list, 3=mark_read
+CREATE OR REPLACE FUNCTION fn_notifications(mode INT, payload JSONB DEFAULT '{}'::jsonb)
+RETURNS JSONB
+LANGUAGE plpgsql
+AS $$
+DECLARE
+    result notifications%ROWTYPE;
+    arr JSONB;
+    uid UUID;
+BEGIN
+    IF mode = 1 THEN
+        INSERT INTO notifications (user_id, type, payload)
+        VALUES (
+            (payload->>'user_id')::uuid,
+            payload->>'type',
+            COALESCE(payload->'payload', '{}'::jsonb)
+        )
+        RETURNING * INTO result;
+
+        RETURN to_jsonb(result);
+
+    ELSIF mode = 2 THEN
+        uid := (payload->>'user_id')::uuid;
+
+        SELECT COALESCE(jsonb_agg(to_jsonb(n) ORDER BY n.created_at DESC), '[]'::jsonb)
+        INTO arr
+        FROM notifications n
+        WHERE n.user_id = uid
+          AND (NOT (payload ? 'unread_only') OR (payload->>'unread_only')::boolean IS NOT TRUE OR n.read_at IS NULL);
+
+        RETURN arr;
+
+    ELSIF mode = 3 THEN
+        UPDATE notifications
+        SET read_at = now()
+        WHERE id = (payload->>'notification_id')::uuid
+          AND user_id = (payload->>'user_id')::uuid
+          AND read_at IS NULL
+        RETURNING * INTO result;
+
+        RETURN CASE WHEN result.id IS NULL THEN NULL ELSE to_jsonb(result) END;
+    END IF;
+
+    RAISE EXCEPTION 'fn_notifications unknown mode: %', mode;
+END;
+$$;
+
 -- fn_search_outbox_events: 1=claim, 2=complete, 3=fail
-CREATE OR REPLACE FUNCTION fn_search_outbox_events(mode INT, payload JSONB DEFAULT '{}'::jsonb)
+CREATE OR REPLACE FUNCTION fn_search_outbox_events(mode INT, p_payload JSONB DEFAULT '{}'::jsonb)
 RETURNS JSONB
 LANGUAGE plpgsql
 AS $$
@@ -1670,7 +1877,7 @@ DECLARE
     ev search_outbox_events%ROWTYPE;
 BEGIN
     IF mode = 1 THEN
-        lim := COALESCE((payload->>'limit')::int, 50);
+        lim := COALESCE((p_payload->>'limit')::int, 50);
 
         WITH claimed AS (
             UPDATE search_outbox_events
@@ -1694,7 +1901,7 @@ BEGIN
     ELSIF mode = 2 THEN
         UPDATE search_outbox_events
         SET status = 'completed', processed_at = now(), last_error = NULL
-        WHERE id = (payload->>'event_id')::uuid
+        WHERE id = (p_payload->>'event_id')::uuid
         RETURNING * INTO ev;
 
         RETURN CASE WHEN ev.id IS NULL THEN NULL ELSE to_jsonb(ev) END;
@@ -1702,9 +1909,9 @@ BEGIN
     ELSIF mode = 3 THEN
         UPDATE search_outbox_events
         SET status = 'pending',
-            last_error = left(payload->>'error', 2000),
+            last_error = left(p_payload->>'error', 2000),
             scheduled_at = now() + interval '1 minute' * LEAST(attempts, 30)
-        WHERE id = (payload->>'event_id')::uuid
+        WHERE id = (p_payload->>'event_id')::uuid
         RETURNING * INTO ev;
 
         RETURN CASE WHEN ev.id IS NULL THEN NULL ELSE to_jsonb(ev) END;

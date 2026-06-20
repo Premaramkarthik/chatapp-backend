@@ -123,6 +123,74 @@ class PostgresMatchingRepository:
             raise ValueError("not_found")
         return row
 
+    async def cancel_request(self, request_id: str, requester_id: str) -> dict[str, Any]:
+        """Cancel a pending outgoing request."""
+        try:
+            result = await call_json_function(
+                "fn_connection_requests",
+                6,
+                {"request_id": request_id, "requester_id": requester_id},
+            )
+        except Exception as exc:
+            map_social_db_error(exc)
+            raise
+        row = row_from_jsonb(result)
+        if row is None:
+            raise ValueError("not_found")
+        return row
+
+    async def list_outgoing_requests(self, requester_id: str) -> list[dict[str, Any]]:
+        """List pending outgoing requests."""
+        result = await call_json_function(
+            "fn_connection_requests",
+            7,
+            {"requester_id": requester_id},
+        )
+        return list_from_jsonb(result)
+
+    async def list_connections(self, user_id: str) -> list[dict[str, Any]]:
+        """List active connections for a user."""
+        result = await call_json_function(
+            "fn_user_connections",
+            3,
+            {"user_id": user_id},
+        )
+        return list_from_jsonb(result)
+
+    async def remove_connection(self, connection_id: str, user_id: str) -> dict[str, Any]:
+        """Soft-remove an active connection."""
+        try:
+            result = await call_json_function(
+                "fn_user_connections",
+                4,
+                {"connection_id": connection_id, "user_id": user_id},
+            )
+        except Exception as exc:
+            map_social_db_error(exc)
+            raise
+        row = row_from_jsonb(result)
+        if row is None:
+            raise ValueError("not_found")
+        return row
+
+    async def list_blocks(self, blocker_id: str) -> list[dict[str, Any]]:
+        """List users blocked by the given user."""
+        result = await call_json_function(
+            "fn_user_blocks",
+            3,
+            {"blocker_id": blocker_id},
+        )
+        return list_from_jsonb(result)
+
+    async def delete_block(self, blocker_id: str, blocked_id: str) -> dict[str, Any] | None:
+        """Remove a block relationship."""
+        result = await call_json_function(
+            "fn_user_blocks",
+            4,
+            {"blocker_id": blocker_id, "blocked_id": blocked_id},
+        )
+        return row_from_jsonb(result)
+
     async def get_connection_between(self, user_id: str, other_id: str) -> dict[str, Any] | None:
         """Return active connection between two users."""
         result = await call_json_function(

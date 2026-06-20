@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 
 from infrastructure.keycloak.google_idp_config import (
+    _collect_post_logout_redirect_uris,
     _collect_web_redirect_uris,
     build_google_idp_payload,
     ensure_keycloak_google_idp,
@@ -32,6 +33,7 @@ def _mock_settings(**overrides: object) -> MagicMock:
     settings.auth.callback_url = "http://localhost:8000/v1/auth/signin/callback"
     settings.auth.default_post_signin_redirect_url = "http://localhost:5173/home/auth/callback"
     settings.auth.email_verify_redirect_url = "http://localhost:5173/home/verify-email/complete"
+    settings.auth.post_logout_redirect_url = "http://localhost:8080/"
     settings.auth.allowed_redirect_origins = ("http://localhost:5173",)
     return settings
 
@@ -63,6 +65,7 @@ def test_build_google_idp_payload_builds_keycloak_shape() -> None:
     assert payload["providerId"] == "google"
     assert payload["config"]["clientId"] == "google-client-id"
     assert payload["config"]["hideOnLoginPage"] == "true"
+    assert payload["config"]["prompt"] == "select_account"
     assert payload["firstBrokerLoginFlowAlias"] == "chatapp-google-auto-link"
 
 
@@ -73,6 +76,14 @@ def test_collect_web_redirect_uris_includes_localhost_mirror() -> None:
     assert "http://localhost:8000/v1/auth/signin/callback" in uris
     assert "http://127.0.0.1:8000/v1/auth/signin/callback" in uris
     assert "http://localhost:5173/home/auth/callback" in uris
+
+
+def test_collect_post_logout_redirect_uris_includes_localhost_variants() -> None:
+    """Post-logout redirect patterns include localhost and 127.0.0.1 wildcards."""
+    with patch("infrastructure.keycloak.google_idp_config.settings", _mock_settings()):
+        uris = _collect_post_logout_redirect_uris()
+    assert "http://localhost:8080/*" in uris
+    assert "http://127.0.0.1:8080/*" in uris
 
 
 @pytest.mark.asyncio
@@ -103,6 +114,7 @@ async def test_ensure_keycloak_google_idp_creates_provider() -> None:
                 "http://127.0.0.1:8000",
             },
         )
+        expected_post_logout = " ".join(sorted(_collect_post_logout_redirect_uris()))
 
     list_response = MagicMock()
     list_response.raise_for_status = MagicMock()
@@ -113,6 +125,7 @@ async def test_ensure_keycloak_google_idp_creates_provider() -> None:
         "clientId": "chatapp-web",
         "redirectUris": expected_redirects,
         "webOrigins": expected_origins,
+        "attributes": {"post.logout.redirect.uris": expected_post_logout},
     }
     idp_get_response = MagicMock()
     idp_get_response.status_code = 404
@@ -175,6 +188,7 @@ async def test_ensure_keycloak_google_idp_updates_existing_provider() -> None:
                 "http://127.0.0.1:8000",
             },
         )
+        expected_post_logout = " ".join(sorted(_collect_post_logout_redirect_uris()))
 
     list_response = MagicMock()
     list_response.raise_for_status = MagicMock()
@@ -185,6 +199,7 @@ async def test_ensure_keycloak_google_idp_updates_existing_provider() -> None:
         "clientId": "chatapp-web",
         "redirectUris": expected_redirects,
         "webOrigins": expected_origins,
+        "attributes": {"post.logout.redirect.uris": expected_post_logout},
     }
     idp_get_response = MagicMock()
     idp_get_response.raise_for_status = MagicMock()
@@ -223,6 +238,7 @@ async def test_ensure_keycloak_google_idp_updates_existing_provider() -> None:
         if method == "PUT" and url.endswith("/identity-provider/instances/google"):
             assert json is not None
             assert json["config"]["clientId"] == "google-client-id"
+            assert json["config"]["prompt"] == "select_account"
             assert json["firstBrokerLoginFlowAlias"] == "chatapp-google-auto-link"
             return idp_put_response
         raise AssertionError(f"Unexpected request: {method} {url}")

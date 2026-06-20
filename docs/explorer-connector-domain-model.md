@@ -20,8 +20,8 @@ Enables access for others through local knowledge, recommendations, introduction
 
 - **account_mode:** `connector`
 - **Typical capability:** `trip:join`
-- **Profile table:** `connector_profiles` (search preferences; HTTP router planned)
-- **Primary API surface:** `/v1/explorers/search` (browse discoverable explorers)
+- **Profile table:** `connector_profiles`
+- **Primary API surface:** `/v1/connectors/profile`, `/v1/explorers/search` (browse discoverable explorers)
 
 There is no `receiver` role in this domain.
 
@@ -35,12 +35,22 @@ There is no `receiver` role in this domain.
 
 ## Permissions model
 
+Role-specific routes enforce **both** Keycloak capabilities and `users.account_mode` (defense in depth). A connector with `trip:create` still receives **403** on explorer trip/profile routes.
+
 | Capability | Intended role | Example endpoints |
 | --- | --- | --- |
-| `trip:create` | Explorer | `PUT /v1/explorers/profile`, `POST /v1/explorers/trips`, `PUT /v1/explorers/location` |
-| `trip:join` | Connector | `GET /v1/explorers/search` |
+| `trip:create` | Explorer | `PUT /v1/explorers/profile`, `POST /v1/explorers/trips`, `PUT /v1/explorers/location`, `GET/PUT /v1/explorers/privacy` |
+| `trip:join` | Connector | `GET /v1/explorers/search`, `GET/PUT /v1/connectors/profile` |
+| `message:send` | Either | `/v1/connections/*`, `/v1/blocks/*`, `/v1/reports/*`, `/v1/notifications/*` |
 
-Account mode gates explorer-only profile routes: connectors receive **403** on `GET/PUT /v1/explorers/profile`.
+Account mode gates:
+
+- Connectors receive **403** on `GET/PUT /v1/explorers/profile`, trips, location, and privacy.
+- Explorers receive **403** on `GET /v1/explorers/search` and `GET/PUT /v1/connectors/profile`.
+
+`PATCH /v1/users/account-mode` atomically sets `account_mode` and bootstraps the required profile row (and explorer privacy defaults) in one SQL transaction via `fn_users` mode 5 + `social_bootstrap_role_context`.
+
+Session (`GET /v1/auth/session`) includes `onboarding_complete` and mode-specific `profile_exists`.
 
 ## User journeys
 

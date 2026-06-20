@@ -13,7 +13,10 @@ from domains.auth.jwks import jwks_refresh_manager
 from domains.auth.verification_reconcile import run_verification_reconcile_loop
 from domains.search.outbox_worker import run_search_outbox_loop
 from infrastructure.database.connection import close_db, init_db
-from infrastructure.keycloak.google_idp_config import ensure_keycloak_google_idp
+from infrastructure.keycloak.google_idp_config import (
+    ensure_keycloak_google_idp,
+    ensure_keycloak_web_client,
+)
 from infrastructure.keycloak.realm_bootstrap import ensure_keycloak_realm
 from infrastructure.keycloak.smtp_config import ensure_keycloak_smtp
 from infrastructure.keycloak.startup_validation import validate_keycloak_startup
@@ -21,7 +24,20 @@ from infrastructure.meilisearch.client import get_meilisearch_client
 from infrastructure.meilisearch.index_settings import ensure_explorer_index_settings
 from infrastructure.redis.cache import auth_redis_cache
 from v1.middleware import setup_middleware
-from v1.routers import auth, chat, connections, explorers, geo, health, internal, users
+from v1.routers import (
+    auth,
+    blocks,
+    chat,
+    connections,
+    connectors,
+    explorers,
+    geo,
+    health,
+    internal,
+    notifications,
+    reports,
+    users,
+)
 
 
 @asynccontextmanager
@@ -36,6 +52,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         if settings.keycloak.enabled:
             await ensure_keycloak_realm()
             await ensure_keycloak_smtp()
+            await ensure_keycloak_web_client()
             await ensure_keycloak_google_idp()
             await validate_keycloak_startup()
         jwks_refresh_manager.start()
@@ -89,7 +106,11 @@ def create_app() -> FastAPI:
     api.include_router(auth.router)
     api.include_router(users.router)
     api.include_router(explorers.router)
+    api.include_router(connectors.router)
     api.include_router(connections.router)
+    api.include_router(blocks.router)
+    api.include_router(reports.router)
+    api.include_router(notifications.router)
     api.include_router(chat.router)
     api.include_router(internal.router)
     api.include_router(geo.router)

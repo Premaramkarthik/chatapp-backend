@@ -55,6 +55,8 @@ def build_google_idp_payload() -> dict[str, Any] | None:
             "hideOnLoginPage": hide_on_login,
             "useJwksUrl": "true",
             "syncMode": "IMPORT",
+            # Forwarded to Google OAuth; always show account picker on broker sign-in.
+            "prompt": "select_account",
         },
     }
 
@@ -94,6 +96,34 @@ def _collect_web_origins() -> set[str]:
         if parsed.scheme and parsed.netloc:
             origins.add(f"{parsed.scheme}://{parsed.netloc}")
     return origins
+
+
+def _collect_post_logout_redirect_uris() -> set[str]:
+    """Build wildcard post-logout redirect patterns from auth settings."""
+    parsed = urlparse(settings.auth.post_logout_redirect_url.rstrip("/"))
+    if not parsed.scheme or not parsed.netloc:
+        return set()
+
+    patterns = {f"{parsed.scheme}://{parsed.netloc}/*"}
+    mirror = _uri_localhost_mirror(f"{parsed.scheme}://{parsed.netloc}/")
+    if mirror:
+        mirror_parsed = urlparse(mirror)
+        if mirror_parsed.scheme and mirror_parsed.netloc:
+            patterns.add(f"{mirror_parsed.scheme}://{mirror_parsed.netloc}/*")
+    return patterns
+
+
+def _parse_post_logout_attribute(attributes: dict[str, Any] | None) -> set[str]:
+    """Parse Keycloak client post.logout.redirect.uris attribute into a set."""
+    raw = (attributes or {}).get("post.logout.redirect.uris", "")
+    if not raw:
+        return set()
+    return {part for part in str(raw).split() if part}
+
+
+def _format_post_logout_attribute(uris: set[str]) -> str:
+    """Format post-logout redirect URIs for Keycloak client attributes."""
+    return " ".join(sorted(uris))
 
 
 async def _request_with_admin_fallback(
@@ -155,16 +185,27 @@ async def _ensure_web_client_redirect_uris(client: httpx.AsyncClient) -> None:
 
     required_redirects = _collect_web_redirect_uris()
     required_origins = _collect_web_origins()
+    required_post_logout = _collect_post_logout_redirect_uris()
     current_redirects = set(client_payload.get("redirectUris") or [])
     current_origins = set(client_payload.get("webOrigins") or [])
+    attributes = dict(client_payload.get("attributes") or {})
+    current_post_logout = _parse_post_logout_attribute(attributes)
 
     merged_redirects = sorted(current_redirects | required_redirects)
     merged_origins = sorted(current_origins | required_origins)
-    if merged_redirects == sorted(current_redirects) and merged_origins == sorted(current_origins):
+    merged_post_logout = current_post_logout | required_post_logout
+    if (
+        merged_redirects == sorted(current_redirects)
+        and merged_origins == sorted(current_origins)
+        and merged_post_logout == current_post_logout
+    ):
         return
 
     client_payload["redirectUris"] = merged_redirects
     client_payload["webOrigins"] = merged_origins
+    if merged_post_logout:
+        attributes["post.logout.redirect.uris"] = _format_post_logout_attribute(merged_post_logout)
+        client_payload["attributes"] = attributes
     update_response = await _request_with_admin_fallback(
         client=client,
         method="PUT",
@@ -174,10 +215,11 @@ async def _ensure_web_client_redirect_uris(client: httpx.AsyncClient) -> None:
     update_response.raise_for_status()
     log_debug(
         logger,
-        "Updated Keycloak web client redirect URIs and web origins",
+        "Updated Keycloak web client redirect URIs, web origins, and post-logout URIs",
         client_id=keycloak.web_client_id,
         redirect_count=len(merged_redirects),
         origin_count=len(merged_origins),
+        post_logout_count=len(merged_post_logout),
     )
 
 
@@ -305,6 +347,15 @@ async def _upsert_google_idp(
         json=merged,
     )
     update_response.raise_for_status()
+
+
+async def ensure_keycloak_web_client() -> None:
+    """Merge auth redirect, origin, and post-logout URIs into chatapp-web."""
+    if not settings.keycloak.enabled:
+        return
+
+    async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
+        await _ensure_web_client_redirect_uris(client)
 
 
 async def ensure_keycloak_google_idp() -> None:

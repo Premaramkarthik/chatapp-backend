@@ -26,7 +26,6 @@ from v1.schemas.auth_bff import (
     EmailVerificationCompleteResponse,
     ForgotPasswordRequest,
     GenericAuthResponse,
-    LogoutResponse,
     OnboardingCompleteRequest,
     ResetPasswordCompleteRequest,
     RevokeAllSessionsRequest,
@@ -49,6 +48,7 @@ from v1.schemas.principal import KeycloakPrincipal
 from v1.schemas.users import UserResponse
 from v1.utils.base import AuthenticationError, SigninCallbackError
 from v1.utils.request_context import request_id_from
+from v1.utils.user_session import build_user_response
 
 router = APIRouter(prefix="/v1/auth", tags=["auth"])
 
@@ -101,7 +101,9 @@ async def signin_password(
         result.csrf_token,
         max_age=result.cookie_max_age_sec,
     )
-    return SigninPasswordResponse(user=UserResponse.model_validate(result.user.to_dict()))
+    return SigninPasswordResponse(
+        user=UserResponse.model_validate(await build_user_response(result.user))
+    )
 
 
 @router.get("/session", response_model=UserResponse)
@@ -120,7 +122,7 @@ async def auth_session(
         ),
         request_id=request_id_from(request),
     )
-    return user.to_dict()
+    return await build_user_response(user)
 
 
 @router.post("/onboarding/complete", response_model=UserResponse)
@@ -137,7 +139,7 @@ async def onboarding_complete(
         account_mode=payload.account_mode,
         request=request,
     )
-    return user.to_dict()
+    return await build_user_response(user)
 
 
 @router.post("/signup/start", response_model=SignupStartResponse, status_code=202)
@@ -299,17 +301,17 @@ async def signin_callback(
         return RedirectResponse(f"{redirect_uri}{separator}{query}", status_code=303)
 
 
-@router.post("/logout", response_model=LogoutResponse)
+@router.post("/logout", response_model=GenericAuthResponse)
 async def logout(
     request: Request,
     response: Response,
     session: CurrentSession,
     auth_service: AuthServiceDependency,
-) -> LogoutResponse:
-    """Revoke current BFF session and clear cookies."""
-    logout_url = await auth_service.logout(session=session, request=request)
+) -> GenericAuthResponse:
+    """Revoke current BFF session, terminate Keycloak SSO, and clear cookies."""
+    await auth_service.logout(session=session, request=request)
     _clear_auth_cookies(response)
-    return LogoutResponse(logout_url=logout_url)
+    return GenericAuthResponse()
 
 
 @router.post("/forgot-password", response_model=GenericAuthResponse)
@@ -363,6 +365,7 @@ async def list_sessions(
 @router.delete("/sessions/all", response_model=RevokeAllSessionsResponse)
 async def revoke_all_sessions(
     payload: RevokeAllSessionsRequest,
+    response: Response,
     request: Request,
     _: SessionManager,
     session: CurrentSession,
@@ -376,6 +379,8 @@ async def revoke_all_sessions(
         keep_session_id=keep_session_id,
         request=request,
     )
+    if not payload.keep_current:
+        _clear_auth_cookies(response)
     return RevokeAllSessionsResponse(revoked_count=count)
 
 

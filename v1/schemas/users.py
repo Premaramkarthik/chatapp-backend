@@ -4,7 +4,7 @@ from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
 
 
 class UserResponse(BaseModel):
@@ -24,6 +24,8 @@ class UserResponse(BaseModel):
     tos_accepted_at: datetime | None = None
     created_at: datetime
     updated_at: datetime
+    onboarding_complete: bool = False
+    profile_exists: bool = False
 
 
 class AccountModeUpdateRequest(BaseModel):
@@ -33,3 +35,18 @@ class AccountModeUpdateRequest(BaseModel):
         ...,
         description="Business account mode. This is app state, not a Keycloak role.",
     )
+
+
+class DisplayNameUpdateRequest(BaseModel):
+    """Request body for updating the user's display name."""
+
+    display_name: str = Field(..., min_length=1, max_length=120)
+
+    @field_validator("display_name")
+    @classmethod
+    def normalize_display_name(cls, value: str) -> str:
+        normalized = " ".join(value.strip().split())
+        if len(normalized) < 2:
+            msg = "Display name must be at least 2 characters"
+            raise ValueError(msg)
+        return normalized
