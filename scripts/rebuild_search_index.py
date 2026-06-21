@@ -26,6 +26,7 @@ from infrastructure.typesense.documents.travelers import (  # noqa: E402
     snapshot_to_traveler_document,
 )
 from infrastructure.typesense.documents.users import user_row_to_document  # noqa: E402
+from infrastructure.typesense.health import health  # noqa: E402
 from infrastructure.typesense.sync import upsert_documents  # noqa: E402
 
 logger = get_logger(__name__)
@@ -126,6 +127,16 @@ async def main_async(args: argparse.Namespace) -> int:
     """Run rebuild for the requested collection."""
     if not settings.typesense.enabled:
         logger.error("TYPESENSE_ENABLED is false; aborting rebuild")
+        return 1
+    ts = settings.typesense
+    ts_health = await health()
+    if not ts_health.ok:
+        logger.error(
+            "Typesense is not reachable; start it with `docker compose up -d typesense` "
+            "then retry",
+            typesense_url=f"{ts.protocol}://{ts.host}:{ts.port}",
+            detail=ts_health.detail,
+        )
         return 1
     await init_db()
     started = time.perf_counter()

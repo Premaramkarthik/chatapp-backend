@@ -105,7 +105,7 @@ CREATE TABLE IF NOT EXISTS matrix_room_archives (
 
 CREATE TABLE IF NOT EXISTS matrix_reports (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-    report_id UUID REFERENCES reports(id) ON DELETE CASCADE,
+    report_id UUID REFERENCES user_reports(id) ON DELETE CASCADE,
     room_id TEXT,
     event_id TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT now()

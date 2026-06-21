@@ -45,7 +45,7 @@ def _travelers_schema(name: str) -> dict[str, Any]:
             {"name": "verified", "type": "bool", "facet": True},
             {"name": "has_upcoming_trip", "type": "bool", "facet": True},
             {"name": "profile_completed", "type": "bool", "facet": True},
-            {"name": "recent_activity_at", "type": "int64", "optional": True},
+            {"name": "recent_activity_at", "type": "int64"},
             {"name": "is_searchable", "type": "bool", "facet": True},
         ],
         "default_sorting_field": "recent_activity_at",

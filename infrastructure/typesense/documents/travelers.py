@@ -46,7 +46,7 @@ def snapshot_to_traveler_document(
         "verified": email_verified,
         "has_upcoming_trip": has_upcoming,
         "profile_completed": profile_completed,
-        "recent_activity_at": _to_unix(row.get("last_active_at")),
+        "recent_activity_at": _to_unix(row.get("last_active_at")) or 0,
         "is_searchable": should_index_traveler_snapshot(row),
     }
     return doc
