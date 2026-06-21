@@ -14,6 +14,14 @@ scrape_configs:
         labels:
           service: chatapp-backend
 
+  - job_name: synapse
+    metrics_path: /_synapse/metrics
+    static_configs:
+      - targets:
+          - synapse:9000
+        labels:
+          service: synapse
+
   - job_name: cadvisor
     static_configs:
       - targets:

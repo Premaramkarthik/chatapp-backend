@@ -61,7 +61,7 @@ Session (`GET /v1/auth/session`) includes `onboarding_complete` and mode-specifi
 3. `PUT /v1/explorers/profile` — creates `explorer_profiles` row
 4. `POST /v1/explorers/trips` — sets destination context
 5. Optional `PUT /v1/explorers/location` — current location for filters
-6. System rebuilds `explorer_discovery_snapshots` and enqueues Meilisearch sync
+6. System rebuilds `explorer_discovery_snapshots` and enqueues Typesense sync
 
 ### Connector — find explorers
 

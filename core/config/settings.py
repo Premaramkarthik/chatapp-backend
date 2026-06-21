@@ -95,9 +95,7 @@ class MiddlewareSettings(EnvSettings):
         "/v1/auth/signup/verify/complete,/v1/auth/signup/social/start,/v1/geo",
         alias="MIDDLEWARE_AUTH_PUBLIC_PATHS",
     )
-    auth_public_prefixes_raw: str = Field(
-        "/internal,/v1/geo", alias="MIDDLEWARE_AUTH_PUBLIC_PREFIXES"
-    )
+    auth_public_prefixes_raw: str = Field("/v1/geo", alias="MIDDLEWARE_AUTH_PUBLIC_PREFIXES")
 
     rate_limit_enabled: bool = Field(True, alias="MIDDLEWARE_RATE_LIMIT_ENABLED")
     rate_limit_requests: int = Field(120, alias="MIDDLEWARE_RATE_LIMIT_REQUESTS")
@@ -109,8 +107,7 @@ class MiddlewareSettings(EnvSettings):
 
     db_session_enabled: bool = Field(True, alias="MIDDLEWARE_DB_SESSION_ENABLED")
     db_session_excluded_paths_raw: str = Field(
-        "/health/live,/health/ready,/metrics,/docs,/redoc,/openapi.json,/v1/system/version,"
-        "/internal/tinode/auth",
+        "/health/live,/health/ready,/metrics,/docs,/redoc,/openapi.json,/v1/system/version",
         alias="MIDDLEWARE_DB_SESSION_EXCLUDED_PATHS",
     )
 
@@ -122,8 +119,7 @@ class MiddlewareSettings(EnvSettings):
         "/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/signin/password,"
         "/v1/auth/forgot-password,/v1/auth/reset-password/complete,/v1/auth/signup,"
         "/v1/auth/signup/start,/v1/auth/signup/complete,/v1/auth/signup/resend,"
-        "/v1/auth/signup/verify/complete,/v1/auth/signup/social/start,"
-        "/internal/tinode/auth",
+        "/v1/auth/signup/verify/complete,/v1/auth/signup/social/start",
         alias="MIDDLEWARE_CSRF_EXCLUDED_PATHS",
     )
     content_security_policy: str = Field(
@@ -485,51 +481,88 @@ class RedisSettings(EnvSettings):
     connect_timeout_sec: float = Field(1.0, alias="REDIS_CONNECT_TIMEOUT_SEC")
 
 
-class TinodeSettings(EnvSettings):
-    """Tinode integration settings."""
+class MatrixSettings(EnvSettings):
+    """Matrix Synapse and chat integration settings."""
 
-    enabled: bool = Field(True, alias="TINODE_ENABLED")
-    web_url: str = Field("http://localhost:6060", alias="TINODE_WEB_URL")
-    grpc_host: str = Field("localhost:16060", alias="TINODE_GRPC_HOST")
-    api_key: SecretStr = Field(SecretStr("change-me"), alias="TINODE_API_KEY")
-    rest_auth_shared_secret: SecretStr = Field(
-        SecretStr("dev-tinode-rest-auth-secret"),
-        alias="TINODE_REST_AUTH_SHARED_SECRET",
+    enabled: bool = Field(True, alias="MATRIX_ENABLED")
+    homeserver_url: str = Field("http://localhost:8008", alias="MATRIX_HOMESERVER_URL")
+    public_homeserver_url: str = Field("", alias="MATRIX_PUBLIC_HOMESERVER_URL")
+    sliding_sync_url: str = Field("http://localhost:8090", alias="MATRIX_SLIDING_SYNC_URL")
+    server_name: str = Field("matrix.local", alias="MATRIX_SERVER_NAME")
+    admin_token: SecretStr = Field(SecretStr(""), alias="MATRIX_ADMIN_TOKEN")
+    access_token_ttl_sec: int = Field(3600, alias="MATRIX_ACCESS_TOKEN_TTL_SEC")
+    session_cache_ttl_sec: int = Field(300, alias="MATRIX_SESSION_CACHE_TTL_SEC")
+    registration_shared_secret: SecretStr = Field(
+        SecretStr("dev-synapse-registration-secret-change-me"),
+        alias="MATRIX_REGISTRATION_SHARED_SECRET",
     )
-    auth_lifetime_sec: int = Field(86400, alias="TINODE_AUTH_LIFETIME_SEC")
-    allow_plaintext_dev_secret: bool = Field(
-        True,
-        alias="TINODE_AUTH_ALLOW_PLAINTEXT_DEV_SECRET",
+    image_max_bytes: int = Field(10 * 1024 * 1024, alias="MATRIX_IMAGE_MAX_BYTES")
+    document_max_bytes: int = Field(25 * 1024 * 1024, alias="MATRIX_DOCUMENT_MAX_BYTES")
+    video_max_bytes: int = Field(100 * 1024 * 1024, alias="MATRIX_VIDEO_MAX_BYTES")
+    message_rate_limit: int = Field(60, alias="MATRIX_MESSAGE_RATE_LIMIT")
+    message_rate_window_sec: int = Field(60, alias="MATRIX_MESSAGE_RATE_WINDOW_SEC")
+    media_rate_limit: int = Field(20, alias="MATRIX_MEDIA_RATE_LIMIT")
+    media_rate_window_sec: int = Field(60, alias="MATRIX_MEDIA_RATE_WINDOW_SEC")
+
+    @property
+    def admin_token_value(self) -> str:
+        """Return plain Synapse admin token."""
+        return self.admin_token.get_secret_value()
+
+    @property
+    def registration_shared_secret_value(self) -> str:
+        """Return plain registration shared secret."""
+        return self.registration_shared_secret.get_secret_value()
+
+    @property
+    def client_homeserver_url(self) -> str:
+        """Browser-visible homeserver URL for matrix-js-sdk."""
+        return (self.public_homeserver_url or self.homeserver_url).rstrip("/")
+
+    @property
+    def client_sliding_sync_url(self) -> str:
+        """Browser-visible sliding sync proxy URL."""
+        return self.sliding_sync_url.rstrip("/")
+
+
+class TypesenseSettings(EnvSettings):
+    """Typesense search engine settings."""
+
+    enabled: bool = Field(True, alias="TYPESENSE_ENABLED")
+    host: str = Field("localhost", alias="TYPESENSE_HOST")
+    port: int = Field(8108, alias="TYPESENSE_PORT")
+    protocol: str = Field("http", alias="TYPESENSE_PROTOCOL")
+    api_key: SecretStr = Field(SecretStr("dev-typesense-api-key"), alias="TYPESENSE_API_KEY")
+    users_collection: str = Field("users", alias="TYPESENSE_USERS_COLLECTION")
+    travelers_collection: str = Field("travelers", alias="TYPESENSE_TRAVELERS_COLLECTION")
+    cities_collection: str = Field("cities", alias="TYPESENSE_CITIES_COLLECTION")
+    countries_collection: str = Field("countries", alias="TYPESENSE_COUNTRIES_COLLECTION")
+    states_collection: str = Field("states", alias="TYPESENSE_STATES_COLLECTION")
+    user_recommendations_collection: str = Field(
+        "user_recommendations",
+        alias="TYPESENSE_USER_RECOMMENDATIONS_COLLECTION",
     )
-    grpc_required: bool = Field(False, alias="TINODE_GRPC_REQUIRED")
-    auto_provision_on_accept: bool = Field(
-        False,
-        alias="TINODE_AUTO_PROVISION_ON_ACCEPT",
+    popular_searches_collection: str = Field(
+        "popular_searches",
+        alias="TYPESENSE_POPULAR_SEARCHES_COLLECTION",
     )
 
     @property
     def api_key_value(self) -> str:
-        """Return plain Tinode API key."""
+        """Return plain Typesense API key."""
         return self.api_key.get_secret_value()
 
-    @property
-    def rest_auth_secret_value(self) -> str:
-        """Return shared secret used to protect Tinode REST auth calls."""
-        return self.rest_auth_shared_secret.get_secret_value()
 
+class SearchSettings(EnvSettings):
+    """Search cache TTL settings."""
 
-class MeilisearchSettings(EnvSettings):
-    """Meilisearch settings."""
-
-    enabled: bool = Field(True, alias="MEILI_ENABLED")
-    url: str = Field("http://localhost:7700", alias="MEILI_URL")
-    master_key: SecretStr = Field(SecretStr("dev-meili-master-key"), alias="MEILI_MASTER_KEY")
-    explorer_index: str = Field("explorers", alias="MEILI_EXPLORER_INDEX")
-
-    @property
-    def master_key_value(self) -> str:
-        """Return plain Meilisearch key."""
-        return self.master_key.get_secret_value()
+    cache_ttl_city_sec: int = Field(86400, alias="SEARCH_CACHE_TTL_CITY_SEC")
+    cache_ttl_country_sec: int = Field(86400, alias="SEARCH_CACHE_TTL_COUNTRY_SEC")
+    cache_ttl_state_sec: int = Field(86400, alias="SEARCH_CACHE_TTL_STATE_SEC")
+    cache_ttl_user_sec: int = Field(300, alias="SEARCH_CACHE_TTL_USER_SEC")
+    cache_ttl_traveler_sec: int = Field(120, alias="SEARCH_CACHE_TTL_TRAVELER_SEC")
+    cache_ttl_global_sec: int = Field(300, alias="SEARCH_CACHE_TTL_GLOBAL_SEC")
+    cache_ttl_recent_sec: int = Field(604800, alias="SEARCH_CACHE_TTL_RECENT_SEC")
 
 
 class GeoSettings(EnvSettings):
@@ -562,8 +595,9 @@ class Settings:
         self.keycloak = KeycloakSettings()
         self.auth = AuthSettings()
         self.redis = RedisSettings()
-        self.tinode = TinodeSettings()
-        self.meilisearch = MeilisearchSettings()
+        self.matrix = MatrixSettings()
+        self.typesense = TypesenseSettings()
+        self.search = SearchSettings()
         self.geo = GeoSettings()
         validate_production_settings(
             environment=self.app.environment,

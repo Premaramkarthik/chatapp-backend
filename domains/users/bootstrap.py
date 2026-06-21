@@ -2,7 +2,8 @@
 
 from __future__ import annotations
 
-from core.logging.logger import get_logger, log_info
+from core.config.settings import settings
+from core.logging.logger import get_logger, log_info, log_warning
 from domains.users.repository import UserRepository
 from domains.users.user import BootstrapUserCommand, User
 
@@ -37,4 +38,25 @@ class BootstrapUser:
             user_id=user.id,
             created=existing is None,
         )
+        if settings.matrix.enabled:
+            from domains.matrix.provisioning.service import (
+                MatrixProvisionError,
+                matrix_provisioning_service,
+            )
+
+            try:
+                await matrix_provisioning_service.ensure_user_provisioned(
+                    user_id=user.id,
+                    display_name=user.display_name or user.email,
+                    request_id=request_id,
+                )
+            except MatrixProvisionError as exc:
+                log_warning(
+                    logger,
+                    "Matrix user provision skipped during bootstrap",
+                    matrix_category="provisioning",
+                    request_id=request_id,
+                    user_id=user.id,
+                    reason=str(exc),
+                )
         return user

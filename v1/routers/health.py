@@ -7,8 +7,8 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from core.config.settings import settings
 from infrastructure.database.connection import call_json_function
 from infrastructure.keycloak.adapter import keycloak_verifier
-from infrastructure.meilisearch.health import health as meilisearch_health
-from infrastructure.tinode.health import health as tinode_health
+from infrastructure.matrix.health import matrix_health, sliding_sync_health
+from infrastructure.typesense.health import health as typesense_health
 
 router = APIRouter(tags=["health"])
 
@@ -22,15 +22,16 @@ async def live() -> dict[str, str]:
 @router.get("/health/ready")
 async def ready(response: Response) -> dict:
     """Readiness check across required Phase 1 dependencies."""
-    checks = {
+    checks: dict[str, dict] = {
         "database": await _check_database(),
         "keycloak": (await keycloak_verifier.health()).__dict__,
-        "meilisearch": (await meilisearch_health()).__dict__,
-        "tinode": (await tinode_health()).__dict__,
     }
-    ok = all(
-        check["ok"] for name, check in checks.items() if name != "tinode" or settings.tinode.enabled
-    )
+    if settings.typesense.enabled:
+        checks["typesense"] = (await typesense_health()).__dict__
+    if settings.matrix.enabled:
+        checks["matrix"] = (await matrix_health()).__dict__
+        checks["sliding_sync"] = (await sliding_sync_health()).__dict__
+    ok = all(check["ok"] for check in checks.values())
     if not ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
     return {"status": "ok" if ok else "degraded", "checks": checks}

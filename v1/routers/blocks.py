@@ -7,6 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from domains.matrix.moderation.service import matrix_moderation_service
 from infrastructure.database.repositories.matching import PostgresMatchingRepository
 from infrastructure.database.repositories.users import PostgresUserRepository
 from v1.dependencies.auth import get_current_principal, require_capability
@@ -41,6 +42,7 @@ async def create_block(
         blocked_id,
         payload.reason,
     )
+    await matrix_moderation_service.on_user_blocked(blocker_id=blocker_id, blocked_id=blocked_id)
     return BlockResponse(**row)
 
 

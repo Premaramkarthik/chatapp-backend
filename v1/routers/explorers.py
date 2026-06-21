@@ -2,22 +2,21 @@
 
 from __future__ import annotations
 
-import asyncio
 from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
+from core.config.settings import settings
 from core.logging.logger import get_logger, log_info
-from domains.auth.security import hash_secret
 from domains.geo.display import enrich_home_location
+from domains.search.filters import TravelerSearchFilters
+from domains.search.service import SearchService
 from infrastructure.database.repositories.discovery import PostgresDiscoveryRepository
 from infrastructure.database.repositories.explorers import PostgresExplorerRepository
 from infrastructure.database.repositories.matching import PostgresMatchingRepository
 from infrastructure.database.repositories.privacy import PostgresPrivacyRepository
 from infrastructure.database.repositories.trips import PostgresTripRepository
-from infrastructure.meilisearch.client import get_meilisearch_client
-from infrastructure.meilisearch.explorer_search import ExplorerSearchQuery, search_explorers
 from v1.dependencies.account_mode import ConnectorUser, ExplorerUser
 from v1.dependencies.auth import require_capability
 from v1.schemas.explorers import (
@@ -172,8 +171,8 @@ async def search_explorers_route(
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
 ) -> ExplorerSearchResponse:
-    """Search discoverable explorers by destination country (Meilisearch + hydrate)."""
-    from core.config.settings import settings
+    """Search discoverable explorers by destination country (Typesense + hydrate)."""
+    from domains.auth.security import hash_secret
 
     request_id = request_id_from(request)
     query_hash = hash_secret(f"{destination_country}:{q}:{city_id}:{current_country}")[:16]
@@ -190,29 +189,30 @@ async def search_explorers_route(
     hits: list[ExplorerSearchResult] = []
     total = 0
 
-    if settings.meilisearch.enabled:
-        query = ExplorerSearchQuery(
+    if settings.typesense.enabled:
+        page = (offset // limit) + 1
+        filters = TravelerSearchFilters(
             destination_country=destination_country.upper(),
             q=q,
             city_id=str(city_id) if city_id is not None else None,
             current_country=current_country.upper() if current_country else None,
             limit=limit,
+            page=page,
             offset=offset,
         )
-        client = get_meilisearch_client()
-        raw = await asyncio.to_thread(
-            search_explorers,
-            client,
-            settings.meilisearch.explorer_index,
-            query,
-        )
-        total = int(raw.get("estimatedTotalHits") or raw.get("totalHits") or 0)
-        meili_hits = raw.get("hits") or []
-        ids = [str(item["id"]) for item in meili_hits]
+        raw = await SearchService().search_travelers(filters, viewer_id=viewer_id)
+        total = int(raw.get("found") or 0)
+        ts_hits = raw.get("hits") or []
+        ids = [
+            str((hit.get("document") or {}).get("user_id") or hit.get("document", {}).get("id"))
+            for hit in ts_hits
+        ]
+        ids = [item for item in ids if item]
         rows = await discovery.fetch_public_by_ids(ids)
         row_by_id = {str(row["user_id"]): row for row in rows}
-        for item in meili_hits:
-            hit_user_id = str(item["id"])
+        for hit in ts_hits:
+            doc = hit.get("document") or {}
+            hit_user_id = str(doc.get("user_id") or doc.get("id"))
             if hit_user_id == viewer_id:
                 continue
             if await PostgresMatchingRepository().is_blocked(viewer_id, hit_user_id):

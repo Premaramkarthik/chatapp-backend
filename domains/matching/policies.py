@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-# Mutual accept required before user_connections and Tinode topic provisioning.
+# Mutual accept required before user_connections and chat provisioning.
 CONNECTION_REQUIRES_MUTUAL_ACCEPT = True
 
 # Primary search dimension is planned destination country; optional current_country filter.

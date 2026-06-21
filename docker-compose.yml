@@ -78,31 +78,75 @@ services:
     volumes:
       - redisinsight_data:/data
 
-  tinode:
-    image: tinode/tinode-postgres:latest
+  synapse-db:
+    image: postgres:17-alpine
     environment:
-      POSTGRES_DSN: postgresql://chatapp:chatapp@postgres:5432/tinode?sslmode=disable&connect_timeout=10
-      SAMPLE_DATA: ""
-      EXT_CONFIG: /etc/tinode/tinode.conf
-      STORE_USE_ADAPTER: postgres
+      POSTGRES_USER: synapse
+      POSTGRES_PASSWORD: synapse
+      POSTGRES_DB: synapse
+      POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - synapse_db_data:/var/lib/postgresql/data
+      - ./docker/postgres/init-syncv3-db.sh:/docker-entrypoint-initdb.d/20-init-syncv3-db.sh:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U synapse -d synapse"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+
+  synapse:
+    image: matrixdotorg/synapse:latest
     depends_on:
-      postgres:
+      synapse-db:
+        condition: service_healthy
+      redis:
         condition: service_healthy
     ports:
-      - "6060:6060"
-      - "16060:16060"
+      - "${SYNAPSE_HOST_PORT:-8008}:8008"
+      - "${SYNAPSE_METRICS_PORT:-9001}:9000"
     volumes:
-      - ./docker/tinode/tinode.conf:/etc/tinode/tinode.conf:ro
+      - ./docker/synapse/homeserver.yaml:/data/homeserver.yaml:ro
+      - ./docker/synapse/log.config:/data/log.config:ro
+      - synapse_data:/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8008/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 18
+      start_period: 60s
 
-  meilisearch:
-    image: getmeili/meilisearch:v1.18
-    environment:
-      MEILI_ENV: development
-      MEILI_MASTER_KEY: dev-meili-master-key
+  sliding-sync:
+    image: ghcr.io/matrix-org/sliding-sync:latest
+    depends_on:
+      synapse:
+        condition: service_healthy
+      synapse-db:
+        condition: service_healthy
     ports:
-      - "7700:7700"
+      - "${SLIDING_SYNC_HOST_PORT:-8090}:8090"
+    environment:
+      SYNCV3_SERVER: http://synapse:8008
+      SYNCV3_DB: postgres://synapse:synapse@synapse-db:5432/syncv3?sslmode=disable
+      SYNCV3_SECRET: ${SLIDING_SYNC_SECRET:-dev-sliding-sync-secret-change-me}
+      SYNCV3_BINDADDR: 0.0.0.0:8090
+    healthcheck:
+      test:
+        [
+          "CMD-SHELL",
+          "curl -sf -o /dev/null -X POST http://127.0.0.1:8090/_matrix/client/unstable/org.matrix.msc3575/sync -w '%{http_code}' | grep -q 401",
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
+
+  typesense:
+    image: typesense/typesense:30.2
+    command: ["--data-dir", "/data", "--api-key=${TYPESENSE_API_KEY:-dev-typesense-api-key}", "--enable-cors"]
+    ports:
+      - "${TYPESENSE_HOST_PORT:-8108}:8108"
     volumes:
-      - meili_data:/meili_data
+      - typesense_data:/data
     healthcheck:
       test:
         [
@@ -110,12 +154,41 @@ services:
           "wget",
           "--no-verbose",
           "--spider",
-          "http://127.0.0.1:7700/health",
+          "http://127.0.0.1:8108/health",
         ]
       interval: 5s
       timeout: 5s
       retries: 12
 
+  search-worker:
+    build:
+      context: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      typesense:
+        condition: service_healthy
+    environment:
+      TYPESENSE_ENABLED: "true"
+      TYPESENSE_HOST: typesense
+      TYPESENSE_PORT: "8108"
+      TYPESENSE_PROTOCOL: http
+      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:-dev-typesense-api-key}
+      REDIS_URL: redis://redis:6379/0
+      DB_HOST: postgres
+      DB_PORT: "5432"
+      DB_USER: ${DB_USER:-chatapp}
+      DB_PASSWORD: ${DB_PASSWORD:-chatapp}
+      DB_NAME: ${DB_NAME:-chatapp}
+    command:
+      [
+        "sh",
+        "-c",
+        "uv run dramatiq workers.search_tasks --processes 1 --threads 2 & uv run python -m workers.outbox_poller",
+      ]
+    restart: unless-stopped
 
   # reverse-proxy:
   #   image: nginx:1.27-alpine
@@ -233,10 +306,12 @@ services:
 
 volumes:
   postgres_data:
+  synapse_db_data:
+  synapse_data:
   redis_data:
   redisinsight_data:
   pgadmin_data:
-  meili_data:
+  typesense_data:
   prometheus_data:
   grafana_data:
   loki_data:

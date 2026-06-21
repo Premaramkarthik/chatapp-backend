@@ -17,19 +17,19 @@ The explorers API lets users:
 3. **Update current location** (country, city, coordinates)
 4. **Search discoverable explorers** heading to a destination country (for connectors)
 
-Profile, trip, and location writes rebuild a **discovery snapshot** in Postgres (`explorer_discovery_snapshots`). When Meilisearch is enabled, a background outbox syncs snapshots into the `explorers` search index for fast filtered search.
+Profile, trip, and location writes rebuild a **discovery snapshot** in Postgres (`explorer_discovery_snapshots`). When Typesense is enabled, a Dramatiq outbox worker syncs snapshots into the `travelers` collection for fast filtered search.
 
 ```mermaid
 flowchart LR
   Client[Web / Mobile client]
   BFF[FastAPI /v1/explorers]
   PG[(PostgreSQL)]
-  Meili[(Meilisearch)]
+  TS[(Typesense)]
 
   Client -->|session cookie or Bearer| BFF
   BFF --> PG
-  BFF -->|search when MEILI_ENABLED| Meili
-  PG -->|discovery snapshot| Meili
+  BFF -->|search via search-service| TS
+  PG -->|outbox events| TS
 ```
 
 
@@ -338,7 +338,7 @@ Search **discoverable** explorers by destination country. Intended for connector
 | Param                 | Required | Description                                               |
 | --------------------- | -------- | --------------------------------------------------------- |
 | `destination_country` | **Yes**  | 2-letter ISO (e.g. `JP`)                                  |
-| `q`                   | No       | Full-text query (Meilisearch only)                        |
+| `q`                   | No       | Full-text query (Typesense)                               |
 | `city_id`             | No       | Filter by destination city UUID                           |
 | `current_country`     | No       | 2-letter ISO — filter explorers currently in this country |
 | `limit`               | No       | 1–50, default 20                                          |
@@ -380,15 +380,16 @@ curl "http://localhost:8000/v1/explorers/search?destination_country=JP&limit=20"
 **Search pipeline**
 
 1. Resolve viewer's local `user_id` (excluded from results).
-2. **If `MEILI_ENABLED=true` (default):**
-  - Query Meilisearch index (`MEILI_EXPLORER_INDEX`, default `explorers`) with filters:
-    - `destination_country`, `visibility = discoverable`, `availability != unavailable`
-    - Optional `destination_city`, `current_country`
-  - Hydrate hit IDs from `explorer_discovery_snapshots` via `fn_discovery_snapshots` mode 4.
-3. **If Meilisearch disabled:**
-  - Postgres fallback via `fn_discovery_snapshots` mode 3 (same discoverability + block rules).
+2. **If `TYPESENSE_ENABLED=true` (default):**
+  - Delegate to `search-service` traveler query on the `travelers` collection with filters:
+    - `destination_country`, discoverability, block exclusions
+    - Optional `destination_city`, `current_country`, `q`
+  - Hydrate hit IDs from `explorer_discovery_snapshots` for response shaping.
+3. **If Typesense disabled:** search returns empty (configure Typesense for user-facing search).
 4. Drop blocked pairs (`user_blocks`) and missing snapshots.
 5. Map rows to `ExplorerSearchResult`.
+
+For global search (users, geo, travelers), use `GET /v1/search/*` — see [configuration-guide.md](./configuration-guide.md).
 
 **Logs**
 
@@ -406,14 +407,14 @@ sequenceDiagram
   participant T as Explorer client
   participant B as BFF
   participant PG as PostgreSQL
-  participant M as Meilisearch
+  participant M as Typesense
 
   T->>B: PATCH /v1/users/account-mode (explorer)
   T->>B: PUT /v1/explorers/profile
   B->>PG: fn_explorer_profiles + rebuild snapshot
   T->>B: POST /v1/explorers/trips
   B->>PG: fn_travel_plans + rebuild snapshot
-  Note over PG,M: Outbox worker syncs snapshot to Meilisearch
+  Note over PG,M: Dramatiq outbox worker syncs snapshot to Typesense
   T->>B: PUT /v1/explorers/location (optional)
   B->>PG: fn_explorer_current_locations + rebuild snapshot
 ```
@@ -433,15 +434,15 @@ Minimum for search visibility:
 sequenceDiagram
   participant M as Connector client
   participant B as BFF
-  participant Meili as Meilisearch
+  participant TS as Typesense
   participant PG as PostgreSQL
 
   M->>B: GET /v1/explorers/search?destination_country=JP
-  alt Meilisearch enabled
-    B->>Meili: filtered search
+  alt Typesense enabled
+    B->>TS: filtered traveler search
     B->>PG: hydrate snapshots by user ids
-  else fallback
-    B->>PG: fn_discovery_snapshots search
+  else Typesense disabled
+    B-->>M: empty results
   end
   B-->>M: hits[] (excludes self + blocked users)
   M->>B: POST /v1/connections/requests (separate API)
@@ -478,15 +479,15 @@ Base URL: `VITE_BACKEND_URL` (default `http://localhost:8000`).
 ## Configuration
 
 
-| Variable               | Default                 | Purpose                                                    |
-| ---------------------- | ----------------------- | ---------------------------------------------------------- |
-| `MEILI_ENABLED`        | `true`                  | Use Meilisearch for search; `false` uses Postgres fallback |
-| `MEILI_URL`            | `http://localhost:7700` | Meilisearch host                                           |
-| `MEILI_MASTER_KEY`     | (dev key)               | API key                                                    |
-| `MEILI_EXPLORER_INDEX` | `explorers`             | Index UID                                                  |
+| Variable | Default | Purpose |
+| -------- | ------- | ------- |
+| `TYPESENSE_ENABLED` | `true` | Enable Typesense-backed search |
+| `TYPESENSE_HOST` | `localhost` | Typesense host |
+| `TYPESENSE_PORT` | `8108` | Typesense port |
+| `TYPESENSE_API_KEY` | (dev key) | Admin API key (server-side only) |
+| `TYPESENSE_TRAVELERS_COLLECTION` | `travelers` | Traveler/explorer collection |
 
-
-Readiness: `GET /health/ready` checks Meilisearch when enabled.
+Readiness: `GET /health/ready` checks Typesense when enabled.
 
 ---
 
@@ -520,12 +521,12 @@ Key tables: `explorer_profiles`, `travel_plans`, `travel_plan_destinations`, `ex
 
 ## Local testing checklist
 
-1. Start stack: Postgres, Redis, Keycloak, Meilisearch (see root [README.md](../README.md)).
+1. Start stack: Postgres, Redis, Keycloak, Typesense, search-worker (see root [README.md](../README.md)).
 2. Run migrations: `uv run python scripts/run_migrations.py`
 3. Sign up / sign in as a **explorer**.
 4. `PUT /profile` → `POST /trips` with `destinations[].country_iso`.
 5. Sign in as a **connector** with `trip:join`.
-6. `GET /search?destination_country=<ISO>` — confirm explorer appears (may require outbox sync if Meilisearch lagging).
+6. `GET /search?destination_country=<ISO>` — confirm explorer appears (may require outbox sync if Typesense lagging).
 7. Confirm blocked users and `visibility: hidden` profiles do not appear.
 
 ---

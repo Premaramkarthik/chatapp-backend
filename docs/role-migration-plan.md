@@ -59,14 +59,14 @@ OpenAPI tag: `explorers` (was `travelers`).
 
 Response schema renames: `ExplorerProfileResponse`, `ExplorerSearchResponse`, etc.
 
-## Meilisearch
+## Search index (Typesense)
 
 | Legacy | New |
 | --- | --- |
-| Env `MEILI_TRAVELER_INDEX` | `MEILI_EXPLORER_INDEX` |
-| Default index UID `travelers` | `explorers` |
+| Legacy explorer search index | Typesense `travelers` collection |
+| Legacy search env vars | `TYPESENSE_*` + `SEARCH_CACHE_TTL_*` |
 
-Re-index or rename the Meilisearch index in each environment after deploy. Documents use the same shape; only index UID and env var changed.
+Re-index with `scripts/rebuild_search_index.py` after deploy. Outbox + Dramatiq workers sync snapshots asynchronously.
 
 ## Frontend coordination
 
@@ -85,7 +85,7 @@ Capabilities in JWT remain `trip:create` (explorer) and `trip:join` (connector);
 1. Deploy backend with migration `009` applied (`python scripts/run_migrations.py`)
 2. Verify `users.account_mode` and profile table names in Postgres
 3. Deploy frontend with new paths and enum values
-4. Point Meilisearch to `explorers` index (create/reindex as needed)
+4. Run `uv run python scripts/rebuild_search_index.py --collection travelers` after Typesense is up
 
 Recommended order: **backend migration first**, then frontend, to avoid mixed old/new API calls during rollout.
 
@@ -96,7 +96,7 @@ Recommended order: **backend migration first**, then frontend, to avoid mixed ol
    - Rename tables back to `traveler_*` / `messenger_profiles`
    - `UPDATE users SET account_mode = 'traveler' WHERE account_mode = 'explorer'` (and connector → messenger)
    - Restore CHECK constraint and redeploy old SQL functions
-3. **Meilisearch** — keep old `travelers` index until rollback window closes
+3. **Typesense** — keep previous index snapshot until rollback window closes
 
 Take a Postgres snapshot before applying `009` in production.
 
@@ -107,5 +107,5 @@ Take a Postgres snapshot before applying `009` in production.
 - [ ] Explorer profile CRUD on `/v1/explorers/profile`
 - [ ] Connector can search on `/v1/explorers/search` with `trip:join`
 - [ ] Discovery snapshots rebuild for explorer users
-- [ ] Outbox syncs to Meilisearch `explorers` index
+- [ ] Outbox syncs to Typesense `travelers` collection
 - [ ] Full pytest suite green

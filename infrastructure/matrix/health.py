@@ -1,0 +1,50 @@
+"""Matrix Synapse health check."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+
+import httpx
+
+from core.config.settings import settings
+
+
+@dataclass(frozen=True)
+class MatrixHealthResult:
+    """Health probe result for Matrix Synapse."""
+
+    ok: bool
+    detail: str
+
+
+async def matrix_health() -> MatrixHealthResult:
+    """Check Synapse client API availability."""
+    if not settings.matrix.enabled:
+        return MatrixHealthResult(ok=True, detail="disabled")
+    url = f"{settings.matrix.homeserver_url.rstrip('/')}/_matrix/client/versions"
+    try:
+        async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
+            response = await client.get(url)
+            if response.status_code == 200:
+                return MatrixHealthResult(ok=True, detail="ok")
+            return MatrixHealthResult(ok=False, detail=f"status={response.status_code}")
+    except Exception as exc:
+        return MatrixHealthResult(ok=False, detail=f"{type(exc).__name__}: {exc}")
+
+
+async def sliding_sync_health() -> MatrixHealthResult:
+    """Check Sliding Sync proxy availability."""
+    if not settings.matrix.enabled:
+        return MatrixHealthResult(ok=True, detail="disabled")
+    url = (
+        f"{settings.matrix.sliding_sync_url.rstrip('/')}"
+        "/_matrix/client/unstable/org.matrix.msc3575/sync"
+    )
+    try:
+        async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
+            response = await client.post(url)
+            if response.status_code in (401, 403, 405):
+                return MatrixHealthResult(ok=True, detail="ok")
+            return MatrixHealthResult(ok=False, detail=f"status={response.status_code}")
+    except Exception as exc:
+        return MatrixHealthResult(ok=False, detail=f"{type(exc).__name__}: {exc}")

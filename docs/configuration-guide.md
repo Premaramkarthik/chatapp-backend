@@ -30,9 +30,30 @@ Keep these in `.env` or your secret manager — **not** in `config.yaml`:
 - `KEYCLOAK_WEB_CLIENT_SECRET`, `KEYCLOAK_ADMIN_CLIENT_SECRET`
 - `AUTH_TOKEN_ENCRYPTION_KEY`
 - SMTP credentials for the optional ops script
-- Third-party API keys (Tinode, Meilisearch)
+- Third-party API keys (Typesense admin key)
 
 See [`.env.example`](../.env.example) for the full secret template.
+
+## Search (Typesense)
+
+When `TYPESENSE_ENABLED=true`, explorer and global search use Typesense collections synced from Postgres via the search outbox and Dramatiq workers.
+
+| Variable | Purpose |
+|----------|---------|
+| `TYPESENSE_HOST`, `TYPESENSE_PORT`, `TYPESENSE_PROTOCOL` | Typesense server |
+| `TYPESENSE_API_KEY` | Admin key (backend + workers only) |
+| `TYPESENSE_*_COLLECTION` | Collection names (`users`, `travelers`, geo, etc.) |
+| `SEARCH_CACHE_TTL_*_SEC` | Redis cache TTLs per search type |
+
+Rebuild indexes after geo sync or bulk data changes:
+
+```bash
+uv run python scripts/rebuild_search_index.py --collection all
+```
+
+Readiness: `GET /health/ready` checks Typesense when enabled.
+
+Full platform documentation: [typesense-search-platform.md](./typesense-search-platform.md)
 
 ## Production guardrails
 

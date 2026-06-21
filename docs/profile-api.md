@@ -49,7 +49,7 @@ flowchart TB
   subgraph effects["Side effects"]
     Privacy[user_privacy_settings row]
     Snap[social_rebuild_discovery_snapshot]
-    Meili[Meilisearch index via outbox]
+    TS[Typesense travelers collection via outbox]
   end
 
   Signup --> Onboard
@@ -57,7 +57,7 @@ flowchart TB
   Session --> GetProf
   PutProf --> Privacy
   PutProf --> Snap
-  Snap --> Meili
+  Snap --> TS
   Mode --> GetProf
 ```
 
@@ -334,7 +334,7 @@ These display fields are **not** stored in `explorer_profiles`; they are compute
 - Current location (`explorer_current_locations`)
 - Primary active travel plan + first destination
 
-It writes `explorer_discovery_snapshots`, which powers Postgres fallback search and (when enabled) Meilisearch indexing. Profile updates therefore affect discoverability without a separate “publish” call.
+It writes `explorer_discovery_snapshots`, which powers Typesense traveler indexing via the search outbox. Profile updates therefore affect discoverability without a separate “publish” call.
 
 If `connection_availability` is null or `account_mode <> 'explorer'`, the snapshot marks the user non-discoverable.
 

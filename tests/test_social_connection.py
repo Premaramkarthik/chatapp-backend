@@ -1,4 +1,4 @@
-"""Social connection domain and Meilisearch mapping tests."""
+"""Social connection domain and Typesense mapping tests."""
 
 from datetime import UTC, date, datetime
 from typing import Any
@@ -9,17 +9,17 @@ from domains.matching.policies import (
     CONNECTION_REQUIRES_MUTUAL_ACCEPT,
     SEARCH_PRIMARY_FIELD,
 )
+from domains.search.filters import TravelerSearchFilters, build_traveler_filters
 from infrastructure.database.jsonb_helpers import (
     list_from_jsonb,
     map_social_db_error,
     row_from_jsonb,
 )
 from infrastructure.database.repositories.matching import PostgresMatchingRepository
-from infrastructure.meilisearch.explorer_documents import (
-    should_index_snapshot,
-    snapshot_to_meili_document,
+from infrastructure.typesense.documents.travelers import (
+    should_index_traveler_snapshot,
+    snapshot_to_traveler_document,
 )
-from infrastructure.meilisearch.explorer_search import ExplorerSearchQuery, build_filter
 
 
 def test_row_from_jsonb_none_and_dict() -> None:
@@ -80,7 +80,7 @@ def test_connection_policies_locked() -> None:
     assert SEARCH_PRIMARY_FIELD == "destination_country"
 
 
-def test_snapshot_to_meili_document_includes_geo() -> None:
+def test_snapshot_to_traveler_document_includes_fields() -> None:
     row = {
         "user_id": "550e8400-e29b-41d4-a716-446655440000",
         "display_name": "Alex",
@@ -88,6 +88,8 @@ def test_snapshot_to_meili_document_includes_geo() -> None:
         "destination_country_iso": "US",
         "current_country_iso": "GB",
         "destination_city_id": None,
+        "destination_city_name": "New York",
+        "current_city_name": "London",
         "connection_availability": "open",
         "visibility": "discoverable",
         "languages": ["en"],
@@ -99,20 +101,24 @@ def test_snapshot_to_meili_document_includes_geo() -> None:
         "geo_lng": -74.0,
         "is_discoverable": True,
     }
-    doc = snapshot_to_meili_document(row)
+    doc = snapshot_to_traveler_document(row, email_verified=True, profile_completed=True)
     assert doc["id"] == row["user_id"]
-    assert doc["destination_country"] == "US"
-    assert doc["_geo"] == {"lat": 40.7, "lng": -74.0}
-    assert "hiking" in doc["search_text"]
+    assert doc["to_country"] == "US"
+    assert doc["from_country"] == "GB"
+    assert doc["to_city"] == "New York"
+    assert doc["verified"] is True
+    assert doc["is_searchable"] is True
 
 
-def test_should_index_snapshot() -> None:
-    assert should_index_snapshot({"is_discoverable": True, "visibility": "discoverable"})
-    assert not should_index_snapshot({"is_discoverable": False, "visibility": "discoverable"})
-    assert not should_index_snapshot({"is_discoverable": True, "visibility": "hidden"})
+def test_should_index_traveler_snapshot() -> None:
+    assert should_index_traveler_snapshot({"is_discoverable": True, "visibility": "discoverable"})
+    assert not should_index_traveler_snapshot(
+        {"is_discoverable": False, "visibility": "discoverable"}
+    )
+    assert not should_index_traveler_snapshot({"is_discoverable": True, "visibility": "hidden"})
 
 
-def test_snapshot_custom_city_name_in_search_text() -> None:
+def test_snapshot_custom_city_name_mapped() -> None:
     row = {
         "user_id": "550e8400-e29b-41d4-a716-446655440000",
         "display_name": "Alex",
@@ -132,18 +138,17 @@ def test_snapshot_custom_city_name_in_search_text() -> None:
         "geo_lng": None,
         "is_discoverable": True,
     }
-    doc = snapshot_to_meili_document(row)
-    assert doc["destination_city"] is None
-    assert "Kothavalasa" in doc["search_text"]
+    doc = snapshot_to_traveler_document(row)
+    assert doc["to_city"] == "Kothavalasa"
 
 
-def test_build_filter_destination_and_current_country() -> None:
-    query = ExplorerSearchQuery(
+def test_build_traveler_filters_destination_and_current_country() -> None:
+    query = TravelerSearchFilters(
         destination_country="us",
         current_country="gb",
         city_id="101",
     )
-    filt = build_filter(query)
-    assert 'destination_country = "US"' in filt
-    assert 'current_country = "GB"' in filt
-    assert 'destination_city = "101"' in filt
+    filt = build_traveler_filters(query)
+    assert "to_country:=US" in filt
+    assert "from_country:=GB" in filt
+    assert "to_city:=101" in filt

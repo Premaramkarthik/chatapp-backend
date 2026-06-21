@@ -1,1 +1,1 @@
-"""Search index sync (Meilisearch outbox)."""
+"""Search domain services."""

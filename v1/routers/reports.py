@@ -6,6 +6,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, status
 
+from domains.matrix.moderation.service import matrix_moderation_service
 from infrastructure.database.repositories.reports import PostgresReportRepository
 from infrastructure.database.repositories.users import PostgresUserRepository
 from v1.dependencies.auth import get_current_principal, require_capability
@@ -49,6 +50,11 @@ async def create_report(
                 detail="Cannot report self",
             ) from exc
         raise
+    await matrix_moderation_service.on_user_reported(
+        report_id=str(row["id"]),
+        reporter_id=reporter_id,
+        reported_id=reported_id,
+    )
     return ReportResponse(**row)
 
 

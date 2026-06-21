@@ -1,0 +1,1 @@
+"""Typesense search index infrastructure."""

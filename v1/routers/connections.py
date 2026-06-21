@@ -8,7 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from core.logging.logger import get_logger, log_info, log_warning
-from domains.chat.provision import maybe_auto_provision_on_accept
+from domains.matrix.rooms.service import maybe_auto_provision_on_accept
 from infrastructure.database.repositories.matching import PostgresMatchingRepository
 from infrastructure.database.repositories.notifications import PostgresNotificationRepository
 from infrastructure.database.repositories.users import PostgresUserRepository
@@ -157,7 +157,6 @@ async def accept_connection_request(
             status_code=status.HTTP_409_CONFLICT,
             detail="Invalid request state",
         ) from exc
-    await maybe_auto_provision_on_accept(row, accepted_by_user_id=recipient_id)
     request_row = await repo.get_request(str(request_id))
     if request_row is not None:
         await _notify(
@@ -171,6 +170,11 @@ async def accept_connection_request(
         request_id=correlation_id,
         connection_id=row.get("id"),
         recipient_id=recipient_id,
+    )
+    await maybe_auto_provision_on_accept(
+        row,
+        accepted_by_user_id=recipient_id,
+        request_id=correlation_id,
     )
     return UserConnectionResponse(**row)
 

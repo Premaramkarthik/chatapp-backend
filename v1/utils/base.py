@@ -103,25 +103,17 @@ class KeycloakIntegrationError(IntegrationError):
         self.code = "keycloak_integration_error"
 
 
-class MeilisearchIntegrationError(IntegrationError):
-    """Raised for Meilisearch-specific integration failures."""
+class TypesenseIntegrationError(IntegrationError):
+    """Raised for Typesense-specific integration failures."""
 
     def __init__(self, message: str, context: dict[str, Any] | None = None) -> None:
         super().__init__(message=message, context=context)
-        self.code = "meilisearch_integration_error"
+        self.code = "typesense_integration_error"
 
 
-class TinodeIntegrationError(IntegrationError):
-    """Base exception for Tinode integration failures."""
-
-    def __init__(self, message: str, context: dict[str, Any] | None = None) -> None:
-        super().__init__(message=message, context=context)
-        self.code = "tinode_integration_error"
-
-
-class TinodeAuthError(TinodeIntegrationError):
-    """Raised when a Tinode REST auth payload cannot be accepted."""
+class MatrixIntegrationError(IntegrationError):
+    """Raised for Matrix Synapse integration failures."""
 
     def __init__(self, message: str, context: dict[str, Any] | None = None) -> None:
         super().__init__(message=message, context=context)
-        self.code = "tinode_auth_error"
+        self.code = "matrix_integration_error"
