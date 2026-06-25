@@ -12,11 +12,19 @@ from core.observability.prometheus_metrics import (
     MATRIX_MEDIA_FAILED_TOTAL,
     MATRIX_MEDIA_UPLOAD_TOTAL,
 )
+from domains.chat.permissions import (
+    InboxStatusFilter,
+    assert_can_chat,
+    enrich_inbox_row,
+    enrich_mapping_row,
+    is_provisioned_room_id,
+    mapping_allows_chat,
+)
 from domains.matrix.encryption.service import matrix_encryption_service
 from domains.matrix.events.service import matrix_business_event_service
 from domains.matrix.moderation.rate_limit import matrix_rate_limiter
 from domains.matrix.notifications.service import matrix_notification_service
-from domains.matrix.rooms.service import matrix_room_service
+from domains.matrix.rooms.service import MatrixRoomProvisionError, matrix_room_service
 from domains.matrix.search.service import matrix_search_service
 from domains.matrix.session.service import MatrixSessionNotReadyError, matrix_session_service
 from infrastructure.database.connection import call_json_function
@@ -78,36 +86,64 @@ async def _require_active_connection(connection_id: str, user_id: str) -> dict:
     return connection
 
 
-def _mapping_response(row: dict) -> ConversationResponse:
+def _mapping_response(
+    row: dict,
+    *,
+    can_chat: bool | None = None,
+    is_user_archived: bool = False,
+) -> ConversationResponse:
+    enriched = enrich_mapping_row(
+        row,
+        can_chat=can_chat,
+        is_user_archived=is_user_archived,
+    )
     return ConversationResponse(
-        id=row["id"],
-        user_connection_id=row["user_connection_id"],
-        room_id=row["room_id"],
-        room_alias=row.get("room_alias"),
-        room_type=row.get("room_type", "dm"),
-        status=row["status"],
-        business_context=row.get("business_context"),
-        created_at=row["created_at"],
-        updated_at=row.get("updated_at"),
+        id=enriched["id"],
+        user_connection_id=enriched["user_connection_id"],
+        room_id=enriched["room_id"],
+        room_alias=enriched.get("room_alias"),
+        room_type=enriched.get("room_type", "dm"),
+        status=enriched["status"],
+        business_context=enriched.get("business_context"),
+        created_at=enriched["created_at"],
+        updated_at=enriched.get("updated_at"),
+        can_chat=enriched["can_chat"],
+        is_archived=enriched["is_archived"],
+        can_archive=enriched["can_archive"],
+        can_reopen=enriched["can_reopen"],
+    )
+
+
+def _inbox_item(row: dict) -> InboxItem:
+    enriched = enrich_inbox_row(row)
+    return InboxItem(
+        connection_id=enriched["connection_id"],
+        connection_status=enriched["connection_status"],
+        connected_at=enriched.get("connected_at"),
+        peer=InboxPeer(**enriched["peer"]),
+        mapping=(
+            ConversationMappingSummary(**enriched["mapping"]) if enriched.get("mapping") else None
+        ),
+        status=enriched["status"],
+        can_chat=enriched["can_chat"],
+        is_archived=enriched["is_archived"],
+        can_archive=enriched["can_archive"],
+        can_reopen=enriched["can_reopen"],
     )
 
 
 @router.get("/inbox", response_model=InboxResponse, summary="List 1:1 chat-eligible connections")
-async def chat_inbox(_: MessageSender, principal: CurrentPrincipal) -> InboxResponse:
+async def chat_inbox(
+    _: MessageSender,
+    principal: CurrentPrincipal,
+    status: Annotated[
+        InboxStatusFilter,
+        Query(description="Filter inbox by conversation mapping status"),
+    ] = "active",
+) -> InboxResponse:
     user = await _local_user(principal)
-    rows = await PostgresConversationRepository().list_inbox(user["id"])
-    items = [
-        InboxItem(
-            connection_id=row["connection_id"],
-            connection_status=row["connection_status"],
-            connected_at=row.get("connected_at"),
-            peer=InboxPeer(**row["peer"]),
-            mapping=(ConversationMappingSummary(**row["mapping"]) if row.get("mapping") else None),
-            can_chat=bool(row.get("can_chat")),
-        )
-        for row in rows
-    ]
-    return InboxResponse(items=items)
+    rows = await PostgresConversationRepository().list_inbox(user["id"], inbox_status=status)
+    return InboxResponse(items=[_inbox_item(row) for row in rows])
 
 
 @router.get(
@@ -121,11 +157,26 @@ async def get_conversation(
     principal: CurrentPrincipal,
 ) -> ConversationResponse:
     user = await _local_user(principal)
-    await _require_active_connection(str(connection_id), user["id"])
-    mapping = await PostgresConversationRepository().get_by_connection(str(connection_id))
+    connection = await _require_active_connection(str(connection_id), user["id"])
+    repo = PostgresConversationRepository()
+    mapping = await repo.get_by_connection(str(connection_id))
     if mapping is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapping not found")
-    return _mapping_response(mapping)
+    if not is_provisioned_room_id(mapping.get("room_id")):
+        try:
+            mapping = await matrix_room_service.provision_dm_for_connection(
+                connection=connection,
+                created_by_user_id=user["id"],
+            )
+        except MatrixRoomProvisionError:
+            pass
+    is_user_archived = await repo.is_user_archived(user["id"], str(connection_id))
+    can_chat = mapping_allows_chat(mapping.get("status"), mapping.get("room_id"))
+    return _mapping_response(
+        mapping,
+        can_chat=can_chat,
+        is_user_archived=is_user_archived,
+    )
 
 
 @router.post(
@@ -143,14 +194,18 @@ async def archive_conversation(
     try:
         mapping = await matrix_room_service.archive_for_connection(
             connection_id=str(connection_id),
-            archived_by_user_id=user["id"],
+            user_id=user["id"],
             reason="user_archive",
         )
     except RuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Mapping not found"
         ) from exc
-    return _mapping_response(mapping)
+    return _mapping_response(
+        mapping,
+        can_chat=mapping_allows_chat(mapping.get("status"), mapping.get("room_id")),
+        is_user_archived=True,
+    )
 
 
 @router.post(
@@ -166,12 +221,16 @@ async def reopen_conversation(
     user = await _local_user(principal)
     await _require_active_connection(str(connection_id), user["id"])
     try:
-        mapping = await matrix_room_service.reopen_for_connection(connection_id=str(connection_id))
+        mapping = await matrix_room_service.reopen_for_connection(
+            connection_id=str(connection_id),
+            user_id=user["id"],
+        )
     except RuntimeError as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Mapping not found"
         ) from exc
-    return _mapping_response(mapping)
+    can_chat = mapping_allows_chat(mapping.get("status"), mapping.get("room_id"))
+    return _mapping_response(mapping, can_chat=can_chat, is_user_archived=False)
 
 
 @router.get(
@@ -517,6 +576,12 @@ async def publish_business_event(
     mapping = await PostgresConversationRepository().get_by_connection(str(connection_id))
     if mapping is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Mapping not found")
+    can_chat = mapping_allows_chat(mapping.get("status"), mapping.get("room_id"))
+    perms = enrich_mapping_row(mapping, can_chat=can_chat)
+    try:
+        assert_can_chat(perms)
+    except ValueError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
     event_type = (
         payload.event_type
         if payload.event_type.startswith("com.paripath.")

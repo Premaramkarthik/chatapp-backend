@@ -70,7 +70,7 @@ def test_connector_gets_403_on_explorer_trip_create(monkeypatch: pytest.MonkeyPa
 
 
 def test_explorer_gets_403_on_connector_search(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Explorers must not run connector search even with trip:join capability."""
+    """Explorers must not run connector explorer search even with trip:join capability."""
     user = _user(account_mode="explorer")
 
     class FakeUserRepository:
@@ -85,7 +85,32 @@ def test_explorer_gets_403_on_connector_search(monkeypatch: pytest.MonkeyPatch) 
     monkeypatch.setattr("v1.dependencies.account_mode.PostgresUserRepository", FakeUserRepository)
     try:
         with TestClient(app) as client:
-            response = client.get("/v1/explorers/search?destination_country=US")
+            deprecated = client.get("/v1/explorers/search?destination_country=US")
+            route = client.get("/v1/connectors/search/explorers?destination_country=US")
+    finally:
+        app.dependency_overrides.clear()
+
+    assert deprecated.status_code == 403
+    assert route.status_code == 403
+
+
+def test_connector_gets_403_on_explorer_connector_search(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Connectors must not run explorer connector search even with trip:create capability."""
+    user = _user(account_mode="connector")
+
+    class FakeUserRepository:
+        async def get_by_keycloak_sub(self, keycloak_sub: str) -> User | None:
+            return user
+
+    monkeypatch.setattr(
+        "v1.middleware.authentication.settings.middleware.auth_enabled",
+        False,
+    )
+    app.dependency_overrides[get_current_principal] = lambda: _principal(user)
+    monkeypatch.setattr("v1.dependencies.account_mode.PostgresUserRepository", FakeUserRepository)
+    try:
+        with TestClient(app) as client:
+            response = client.get("/v1/explorers/search/connectors?destination_country=US")
     finally:
         app.dependency_overrides.clear()
 

@@ -53,7 +53,7 @@ class MatrixSearchService:
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         """Search inbox rooms by peer display name or alias."""
-        rows = await self._conversations.list_inbox(str(user["id"]), include_archived=True)
+        rows = await self._conversations.list_inbox(str(user["id"]), inbox_status="all")
         needle = search_term.lower()
         matches: list[dict[str, Any]] = []
         for row in rows:

@@ -140,6 +140,29 @@ services:
       retries: 12
       start_period: 30s
 
+  synapse-bootstrap:
+    image: matrixdotorg/synapse:latest
+    depends_on:
+      synapse:
+        condition: service_healthy
+      synapse-db:
+        condition: service_healthy
+    environment:
+      MATRIX_SERVICE_ADMIN_USER: ${MATRIX_SERVICE_ADMIN_USER:-connectcarry-admin}
+      MATRIX_SERVICE_ADMIN_PASSWORD: ${MATRIX_SERVICE_ADMIN_PASSWORD:-dev-synapse-service-admin-change-me}
+      MATRIX_SERVER_NAME: ${MATRIX_SERVER_NAME:-matrix.local}
+      PGHOST: synapse-db
+      PGUSER: synapse
+      PGPASSWORD: synapse
+      PGDATABASE: synapse
+      SYNAPSE_URL: http://synapse:8008
+    volumes:
+      - ./docker/synapse/homeserver.yaml:/data/homeserver.yaml:ro
+      - synapse_data:/data
+      - ./scripts/bootstrap_synapse_service_admin.sh:/scripts/bootstrap_synapse_service_admin.sh:ro
+    entrypoint: ["/bin/sh", "/scripts/bootstrap_synapse_service_admin.sh"]
+    restart: "no"
+
   typesense:
     image: typesense/typesense:30.2
     command: ["--data-dir", "/data", "--api-key=${TYPESENSE_API_KEY:-dev-typesense-api-key}", "--enable-cors"]
@@ -160,35 +183,38 @@ services:
       timeout: 5s
       retries: 12
 
-  search-worker:
-    build:
-      context: .
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      typesense:
-        condition: service_healthy
-    environment:
-      TYPESENSE_ENABLED: "true"
-      TYPESENSE_HOST: typesense
-      TYPESENSE_PORT: "8108"
-      TYPESENSE_PROTOCOL: http
-      TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:-dev-typesense-api-key}
-      REDIS_URL: redis://redis:6379/0
-      DB_HOST: postgres
-      DB_PORT: "5432"
-      DB_USER: ${DB_USER:-chatapp}
-      DB_PASSWORD: ${DB_PASSWORD:-chatapp}
-      DB_NAME: ${DB_NAME:-chatapp}
-    command:
-      [
-        "sh",
-        "-c",
-        "uv run dramatiq workers.search_tasks --processes 1 --threads 2 & uv run python -m workers.outbox_poller",
-      ]
-    restart: unless-stopped
+  # search-worker: run locally for dev (see commands below)
+  # search-worker:
+  #   build:
+  #     context: .
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+  #     typesense:
+  #       condition: service_healthy
+  #   environment:
+  #     TYPESENSE_ENABLED: "true"
+  #     TYPESENSE_HOST: typesense
+  #     TYPESENSE_PORT: "8108"
+  #     TYPESENSE_PROTOCOL: http
+  #     TYPESENSE_API_KEY: ${TYPESENSE_API_KEY:-dev-typesense-api-key}
+  #     REDIS_URL: redis://redis:6379/0
+  #     DB_HOST: postgres
+  #     DB_PORT: "5432"
+  #     DB_USER: ${DB_USER:-chatapp}
+  #     DB_PASSWORD: ${DB_PASSWORD:-chatapp}
+  #     DB_NAME: ${DB_NAME:-chatapp}
+  #   command:
+  #     [
+  #       "sh",
+  #       "-c",
+  #       "uv run dramatiq workers.search_tasks --processes 1 --threads 2 & uv run python -m workers.outbox_poller",
+  #     ]
+  #   restart: unless-stopped
+
+  # api (uvicorn): run locally for dev — `uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000`
 
   # reverse-proxy:
   #   image: nginx:1.27-alpine

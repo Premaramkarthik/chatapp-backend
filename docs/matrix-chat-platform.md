@@ -235,6 +235,7 @@ erDiagram
 | `matrix_attachment_metadata` | MXC event references, mimetype, size, sha256 | File bytes (Synapse media repo) |
 | `matrix_business_events` | Custom timeline event audit (`com.paripath.*`) | Full event JSON (on Synapse) |
 | `matrix_room_settings` | Pins, mute, retention policy | — |
+| `matrix_inbox_archive` | Per-user inbox archive preference `(user_id, user_connection_id)` | — |
 | `matrix_room_archives` | Archive audit log | — |
 | `matrix_reports` | Links user reports to room/event context | — |
 
@@ -245,9 +246,9 @@ stateDiagram-v2
     [*] --> provisioning: connection accepted
     provisioning --> active: Synapse room created
     provisioning --> failed: provision error
-    active --> archived: block or manual archive
-    archived --> active: reopen
 ```
+
+**Per-user inbox archive** (separate from mapping lifecycle): `matrix_inbox_archive` rows move a connection into the viewer's Archived tab via `fn_matrix_room_mappings` modes 5/6. Shared mapping stays `active`; `can_chat` is true when `room_id LIKE '!%'` and not blocked.
 
 Placeholder room_id before provision: `!pending_{connection_id}:local`
 
@@ -260,7 +261,7 @@ All Matrix DB access goes through PL/pgSQL functions (no raw table writes from P
 | Function | Modes | Purpose |
 |----------|-------|---------|
 | `fn_matrix_user_mappings` | 1=upsert, 2=by user_id, 3=by keycloak_sub, 4=by mxid | User ↔ MXID mapping |
-| `fn_matrix_room_mappings` | 1=get, 2=provision, 3=inbox, 4=update, 5=archive, 6=reopen | Room lifecycle |
+| `fn_matrix_room_mappings` | 1=get, 2=provision, 3=inbox, 4=update, 5=per-user archive, 6=per-user reopen | Room lifecycle + inbox archive |
 | `fn_matrix_user_devices` | 1=upsert, 2=list, 3=get, 4=delete, 5=verify | Device metadata |
 | `fn_matrix_attachment_metadata` | 1=upsert, 2=list by room, 3=search | Attachment index |
 | `fn_matrix_business_events` | 1=record, 2=list by room | Business event audit |
@@ -397,12 +398,12 @@ Browser uses `MATRIX_PUBLIC_HOMESERVER_URL` when set (falls back to `MATRIX_HOME
 
 | Method | Path | Summary | Response |
 |--------|------|---------|----------|
-| GET | `/v1/chat/inbox` | Active connections eligible for chat | `InboxResponse { items: InboxItem[] }` |
+| GET | `/v1/chat/inbox?status=active\|archived\|all` | Filter inbox by **viewer's** archive preference (default `active`) | `InboxResponse { items: InboxItem[] }` |
 | GET | `/v1/chat/conversations/{connection_id}` | Room mapping for connection | `ConversationResponse` |
-| POST | `/v1/chat/conversations/{connection_id}/archive` | Archive DM | `ConversationResponse` |
-| POST | `/v1/chat/conversations/{connection_id}/reopen` | Reopen archived DM | `ConversationResponse` |
+| POST | `/v1/chat/conversations/{connection_id}/archive` | Archive in viewer's inbox only | `ConversationResponse` |
+| POST | `/v1/chat/conversations/{connection_id}/reopen` | Remove from viewer's archived inbox | `ConversationResponse` |
 
-**`InboxItem` fields:** `connection_id`, `connection_status`, `connected_at`, `peer { user_id, display_name, email, matrix_user_id }`, `mapping?`, `can_chat`
+**`InboxItem` permission fields (backend source of truth):** `status` (mapping lifecycle: active/provisioning/failed), `can_chat` (room provisioned + not blocked; independent of archive), `is_archived` (viewer's inbox archive), `can_archive`, `can_reopen`, plus `connection_id`, `peer`, `mapping?`
 
 ### Matrix session
 
@@ -645,7 +646,9 @@ From [`core/config/settings.py`](../core/config/settings.py) (`MatrixSettings`) 
 | `MATRIX_PUBLIC_HOMESERVER_URL` | `""` | Browser-facing URL (falls back to homeserver URL) |
 | `MATRIX_SLIDING_SYNC_URL` | `http://localhost:8090` | Sliding Sync proxy |
 | `MATRIX_SERVER_NAME` | `matrix.local` | MXID domain suffix |
-| `MATRIX_ADMIN_TOKEN` | `""` | Synapse admin API bearer token |
+| `MATRIX_SERVICE_ADMIN_USER` | `connectcarry-admin` | Backend service admin localpart |
+| `MATRIX_SERVICE_ADMIN_PASSWORD` | dev default | Service admin password (Compose bootstrap) |
+| `MATRIX_ADMIN_TOKEN` | `""` | Optional emergency override — normal path logs in |
 | `MATRIX_ACCESS_TOKEN_TTL_SEC` | `3600` | Login token validity |
 | `MATRIX_SESSION_CACHE_TTL_SEC` | `300` | Redis session cache cap |
 | `MATRIX_REGISTRATION_SHARED_SECRET` | dev secret | Must match Synapse config |
@@ -829,29 +832,28 @@ tests/test_matrix_chat_api.py
 
 ## Local Development Checklist
 
-1. Start stack:
-   ```bash
-   docker compose up -d postgres redis synapse-db synapse sliding-sync
-   ```
-2. Apply migrations: `uv run python scripts/run_migrations.py`
-3. Generate Synapse admin token (first run creates signing key):
-   ```bash
-   docker compose exec synapse register_new_matrix_user -c /data/homeserver.yaml -u admin -p admin -a http://localhost:8008
-   # Or use existing admin token → set MATRIX_ADMIN_TOKEN in .env
-   ```
-4. Set in `.env`:
+1. Set in `.env`:
    ```bash
    MATRIX_ENABLED=true
    MATRIX_HOMESERVER_URL=http://localhost:8008
    MATRIX_PUBLIC_HOMESERVER_URL=http://localhost:8008
    MATRIX_SLIDING_SYNC_URL=http://localhost:8090
-   MATRIX_ADMIN_TOKEN=syt_...
    MATRIX_SERVER_NAME=matrix.local
+   MATRIX_SERVICE_ADMIN_USER=connectcarry-admin
+   MATRIX_SERVICE_ADMIN_PASSWORD=dev-synapse-service-admin-change-me
    ```
-5. Start API: `uv run uvicorn main:app --reload`
-6. Verify readiness: `curl http://localhost:8000/health/ready`
-7. Sign in two users, create connection, accept → room auto-provisioned
-8. Open `/chat` in connect-carry — session bootstrap + encrypted messaging
+2. Start stack (bootstrap creates the service admin):
+   ```bash
+   docker compose up -d postgres redis synapse-db synapse sliding-sync synapse-bootstrap
+   ```
+3. Apply migrations: `uv run python scripts/run_migrations.py`
+4. Start API: `uv run uvicorn main:app --reload`
+5. Verify readiness — expect `matrix_admin` ok:
+   ```bash
+   curl http://localhost:8000/health/ready
+   ```
+6. Sign in two users, create connection, accept → room auto-provisioned (`can_chat: true`)
+7. Open `/chat` in connect-carry — session bootstrap + encrypted messaging
 
 ---
 

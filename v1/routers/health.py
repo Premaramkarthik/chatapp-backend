@@ -7,7 +7,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from core.config.settings import settings
 from infrastructure.database.connection import call_json_function
 from infrastructure.keycloak.adapter import keycloak_verifier
-from infrastructure.matrix.health import matrix_health, sliding_sync_health
+from infrastructure.matrix.health import matrix_admin_health, matrix_health, sliding_sync_health
 from infrastructure.typesense.health import health as typesense_health
 
 router = APIRouter(tags=["health"])
@@ -30,6 +30,7 @@ async def ready(response: Response) -> dict:
         checks["typesense"] = (await typesense_health()).__dict__
     if settings.matrix.enabled:
         checks["matrix"] = (await matrix_health()).__dict__
+        checks["matrix_admin"] = (await matrix_admin_health()).__dict__
         checks["sliding_sync"] = (await sliding_sync_health()).__dict__
     ok = all(check["ok"] for check in checks.values())
     if not ok:

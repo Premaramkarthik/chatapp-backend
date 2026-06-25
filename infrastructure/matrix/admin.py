@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import asyncio
 import time
 from typing import Any
+from urllib.parse import quote
 
 import httpx
 
@@ -23,12 +25,111 @@ class SynapseAdminClient:
 
     def __init__(self, *, base_url: str | None = None, admin_token: str | None = None) -> None:
         self._base_url = (base_url or settings.matrix.homeserver_url).rstrip("/")
-        self._admin_token = admin_token or settings.matrix.admin_token_value
+        override = admin_token if admin_token is not None else settings.matrix.admin_token_value
+        self._static_token = override or None
+        self._access_token: str | None = None
+        self._login_lock = asyncio.Lock()
 
-    def _headers(self) -> dict[str, str]:
-        if not self._admin_token:
-            raise MatrixIntegrationError("MATRIX_ADMIN_TOKEN is not configured")
-        return {"Authorization": f"Bearer {self._admin_token}"}
+    @property
+    def service_admin_mxid(self) -> str:
+        """Return configured service admin MXID."""
+        return settings.matrix.service_admin_mxid
+
+    async def login(self) -> str:
+        """Obtain and cache a Synapse admin access token."""
+        if self._static_token:
+            self._access_token = self._static_token
+            return self._static_token
+        async with self._login_lock:
+            if self._access_token:
+                return self._access_token
+            return await self._login_unlocked()
+
+    async def get_token(self) -> str:
+        """Return cached admin token, logging in when needed."""
+        if self._static_token:
+            return self._static_token
+        if self._access_token:
+            return self._access_token
+        return await self.login()
+
+    async def retry_login(self) -> str:
+        """Force a fresh service-admin login after auth failures."""
+        if self._static_token:
+            return self._static_token
+        async with self._login_lock:
+            self._access_token = None
+            return await self._login_unlocked()
+
+    async def verify_admin_access(self) -> None:
+        """Confirm the current token can reach the Synapse Admin API."""
+        mxid = quote(self.service_admin_mxid, safe="")
+        await self._request("GET", f"/_synapse/admin/v2/users/{mxid}")
+
+    async def _login_unlocked(self) -> str:
+        """Login without acquiring the lock (caller must hold it)."""
+        url = f"{self._base_url}/_matrix/client/v3/login"
+        body = {
+            "type": "m.login.password",
+            "identifier": {
+                "type": "m.id.user",
+                "user": settings.matrix.service_admin_user,
+            },
+            "password": settings.matrix.service_admin_password_value,
+        }
+        return await self._login_post(url, body)
+
+    async def _login_post(
+        self,
+        url: str,
+        body: dict[str, Any],
+        *,
+        _rate_limit_retry: bool = True,
+    ) -> str:
+        """POST login and return access_token, with one short 429 backoff."""
+        try:
+            async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
+                response = await client.post(url, json=body)
+                if response.status_code == 429 and _rate_limit_retry and not self._static_token:
+                    retry_after_ms = 0
+                    try:
+                        payload = response.json()
+                        retry_after_ms = int(payload.get("retry_after_ms") or 0)
+                    except Exception:
+                        retry_after_ms = 0
+                    # ponytail: one short wait for dev reload bursts; long blocks fail fast
+                    if 0 < retry_after_ms <= 15_000:
+                        await asyncio.sleep(retry_after_ms / 1000)
+                        return await self._login_post(url, body, _rate_limit_retry=False)
+                response.raise_for_status()
+                payload = response.json()
+        except httpx.HTTPStatusError as exc:
+            context: dict[str, Any] = {"status_code": exc.response.status_code}
+            if exc.response.status_code == 429:
+                context["hint"] = (
+                    "Synapse login rate limit exceeded; wait and restart, "
+                    "or restart synapse after homeserver rc_login changes"
+                )
+            raise MatrixIntegrationError(
+                "Matrix service admin login failed",
+                context=context,
+            ) from exc
+        except Exception as exc:
+            raise MatrixIntegrationError(
+                "Matrix service admin login failed",
+                context={"detail": str(exc)},
+            ) from exc
+
+        token = payload.get("access_token")
+        if not isinstance(token, str) or not token:
+            raise MatrixIntegrationError(
+                "Matrix service admin login returned no access_token",
+            )
+        self._access_token = token
+        return token
+
+    def _auth_headers(self, token: str) -> dict[str, str]:
+        return {"Authorization": f"Bearer {token}"}
 
     async def _request(
         self,
@@ -36,19 +137,24 @@ class SynapseAdminClient:
         path: str,
         *,
         json: dict[str, Any] | None = None,
+        _retry: bool = True,
     ) -> dict[str, Any]:
         """Execute an admin API request and return parsed JSON."""
         url = f"{self._base_url}{path}"
         started = time.perf_counter()
         operation = path.split("?")[0]
+        token = await self.get_token()
         try:
             async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
                 response = await client.request(
                     method,
                     url,
-                    headers=self._headers(),
+                    headers=self._auth_headers(token),
                     json=json,
                 )
+                if response.status_code == 401 and _retry and not self._static_token:
+                    await self.retry_login()
+                    return await self._request(method, path, json=json, _retry=False)
                 response.raise_for_status()
                 MATRIX_ADMIN_REQUESTS_TOTAL.labels(operation=operation, status="success").inc()
                 if not response.content:
@@ -72,6 +178,8 @@ class SynapseAdminClient:
                 "Synapse admin request failed",
                 context={"path": path, "status_code": exc.response.status_code},
             ) from exc
+        except MatrixIntegrationError:
+            raise
         except Exception as exc:
             MATRIX_ADMIN_REQUESTS_TOTAL.labels(operation=operation, status="error").inc()
             log_warning(

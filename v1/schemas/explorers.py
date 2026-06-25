@@ -135,26 +135,4 @@ class CurrentLocationUpdateRequest(BaseModel):
         return self
 
 
-class ExplorerSearchResult(BaseModel):
-    """Public explorer card for search results."""
-
-    user_id: UUID
-    display_name: str | None = None
-    headline: str | None = None
-    avatar_url: str | None = None
-    destination_country_iso: str | None = None
-    destination_city_name: str | None = None
-    current_country_iso: str | None = None
-    languages: list[str] = Field(default_factory=list)
-    interests: list[str] = Field(default_factory=list)
-    connection_availability: str = "open"
-    last_active_at: datetime | None = None
-
-
-class ExplorerSearchResponse(BaseModel):
-    """Paginated explorer search response."""
-
-    hits: list[ExplorerSearchResult]
-    total: int
-    limit: int
-    offset: int
+# Search result models live in v1.schemas.connector_search for role-scoped APIs.

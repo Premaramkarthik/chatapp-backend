@@ -14,6 +14,7 @@ from core.observability.prometheus_metrics import (
 )
 from domains.search.filters import (
     TravelerSearchFilters,
+    build_role_filter,
     build_traveler_filters,
     build_viewer_filters,
     combine_filters,
@@ -23,14 +24,8 @@ from infrastructure.redis.search_cache import search_redis_cache
 from infrastructure.typesense.client import get_typesense_async_client
 from v1.utils.base import TypesenseIntegrationError
 
-USER_SORT = (
-    "_text_match:desc,verified:desc,profile_completed:desc,"
-    "connections_count:desc,recent_activity_at:desc,search_popularity:desc"
-)
-TRAVELER_SORT = (
-    "_text_match:desc,verified:desc,has_upcoming_trip:desc,"
-    "profile_completed:desc,recent_activity_at:desc,departure_date:asc"
-)
+USER_SORT = "_text_match:desc,verified:desc,recent_activity_at:desc"
+TRAVELER_SORT = "_text_match:desc,has_upcoming_trip:desc,departure_date:asc"
 
 
 class SearchService:
@@ -88,10 +83,14 @@ class SearchService:
         viewer_id: str | None,
         page: int = 1,
         limit: int = 20,
+        role: str | None = None,
     ) -> dict[str, Any]:
         """Search users with ranking and visibility filters."""
         blocked = await load_block_exclusions(viewer_id)
-        filter_by = build_viewer_filters(viewer_id, blocked)
+        filter_by = combine_filters(
+            build_viewer_filters(viewer_id, blocked),
+            build_role_filter(role),
+        )
         cache_key = self._cache.key_for(
             "user",
             q=q.strip().lower(),
@@ -99,6 +98,7 @@ class SearchService:
             limit=limit,
             viewer=viewer_id or "",
             filter=filter_by,
+            role=role or "",
         )
         params: dict[str, Any] = {
             "q": q or "*",

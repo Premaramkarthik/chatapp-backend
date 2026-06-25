@@ -35,6 +35,8 @@ dependencies = [
     "matrix-nio[e2e]>=0.25.2",
     "tqdm>=4.68.2",
 ]
+
+[project.optional-dependencies]
 dev = [
     "black>=25.11.0",
     "pytest>=9.0.0",

@@ -90,3 +90,10 @@ def combine_filters(*clauses: str) -> str:
     """Join non-empty filter clauses with &&."""
     parts = [clause for clause in clauses if clause]
     return " && ".join(parts)
+
+
+def build_role_filter(role: str | None) -> str:
+    """Build account-mode filter for user collection searches."""
+    if not role:
+        return ""
+    return f"role:={role.strip().lower()}"

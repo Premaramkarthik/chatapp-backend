@@ -489,6 +489,11 @@ class MatrixSettings(EnvSettings):
     public_homeserver_url: str = Field("", alias="MATRIX_PUBLIC_HOMESERVER_URL")
     sliding_sync_url: str = Field("http://localhost:8090", alias="MATRIX_SLIDING_SYNC_URL")
     server_name: str = Field("matrix.local", alias="MATRIX_SERVER_NAME")
+    service_admin_user: str = Field("connectcarry-admin", alias="MATRIX_SERVICE_ADMIN_USER")
+    service_admin_password: SecretStr = Field(
+        SecretStr("dev-synapse-service-admin-change-me"),
+        alias="MATRIX_SERVICE_ADMIN_PASSWORD",
+    )
     admin_token: SecretStr = Field(SecretStr(""), alias="MATRIX_ADMIN_TOKEN")
     access_token_ttl_sec: int = Field(3600, alias="MATRIX_ACCESS_TOKEN_TTL_SEC")
     session_cache_ttl_sec: int = Field(300, alias="MATRIX_SESSION_CACHE_TTL_SEC")
@@ -506,8 +511,18 @@ class MatrixSettings(EnvSettings):
 
     @property
     def admin_token_value(self) -> str:
-        """Return plain Synapse admin token."""
+        """Return optional static Synapse admin token override."""
         return self.admin_token.get_secret_value()
+
+    @property
+    def service_admin_password_value(self) -> str:
+        """Return plain Matrix service admin password."""
+        return self.service_admin_password.get_secret_value()
+
+    @property
+    def service_admin_mxid(self) -> str:
+        """Return full MXID for the backend service admin account."""
+        return f"@{self.service_admin_user}:{self.server_name}"
 
     @property
     def registration_shared_secret_value(self) -> str:

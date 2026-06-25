@@ -1,4 +1,4 @@
-"""Explorer profile, trips, location, and search routes."""
+"""Explorer profile, trips, and location routes."""
 
 from __future__ import annotations
 
@@ -7,24 +7,19 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 
-from core.config.settings import settings
 from core.logging.logger import get_logger, log_info
 from domains.geo.display import enrich_home_location
-from domains.search.filters import TravelerSearchFilters
-from domains.search.service import SearchService
-from infrastructure.database.repositories.discovery import PostgresDiscoveryRepository
 from infrastructure.database.repositories.explorers import PostgresExplorerRepository
-from infrastructure.database.repositories.matching import PostgresMatchingRepository
 from infrastructure.database.repositories.privacy import PostgresPrivacyRepository
 from infrastructure.database.repositories.trips import PostgresTripRepository
 from v1.dependencies.account_mode import ConnectorUser, ExplorerUser
 from v1.dependencies.auth import require_capability
+from v1.routers.connector_search import search_explorers_by_route
+from v1.schemas.connector_search import ExplorerSearchResponse
 from v1.schemas.explorers import (
     CurrentLocationUpdateRequest,
     ExplorerProfileResponse,
     ExplorerProfileUpdateRequest,
-    ExplorerSearchResponse,
-    ExplorerSearchResult,
     TravelPlanCreateRequest,
 )
 from v1.schemas.principal import KeycloakPrincipal
@@ -159,8 +154,8 @@ async def update_current_location(
     return {"location": dict(row)}
 
 
-@router.get("/search", response_model=ExplorerSearchResponse)
-async def search_explorers_route(
+@router.get("/search", response_model=ExplorerSearchResponse, deprecated=True)
+async def search_explorers_deprecated(
     request: Request,
     _: TripSearcher,
     user: ConnectorUser,
@@ -171,89 +166,20 @@ async def search_explorers_route(
     limit: int = Query(20, ge=1, le=50),
     offset: int = Query(0, ge=0),
 ) -> ExplorerSearchResponse:
-    """Search discoverable explorers by destination country (Typesense + hydrate)."""
-    from domains.auth.security import hash_secret
-
-    request_id = request_id_from(request)
-    query_hash = hash_secret(f"{destination_country}:{q}:{city_id}:{current_country}")[:16]
-    viewer_id = user.id
+    """Deprecated: use GET /v1/connectors/search/explorers instead."""
     log_info(
         logger,
-        "Explorer search request received",
-        request_id=request_id,
-        viewer_id=viewer_id,
-        destination_country=destination_country.upper(),
-        query_hash=query_hash,
+        "Deprecated explorer search alias invoked",
+        request_id=request_id_from(request),
+        viewer_id=user.id,
     )
-    discovery = PostgresDiscoveryRepository()
-    hits: list[ExplorerSearchResult] = []
-    total = 0
-
-    if settings.typesense.enabled:
-        page = (offset // limit) + 1
-        filters = TravelerSearchFilters(
-            destination_country=destination_country.upper(),
-            q=q,
-            city_id=str(city_id) if city_id is not None else None,
-            current_country=current_country.upper() if current_country else None,
-            limit=limit,
-            page=page,
-            offset=offset,
-        )
-        raw = await SearchService().search_travelers(filters, viewer_id=viewer_id)
-        total = int(raw.get("found") or 0)
-        ts_hits = raw.get("hits") or []
-        ids = [
-            str((hit.get("document") or {}).get("user_id") or hit.get("document", {}).get("id"))
-            for hit in ts_hits
-        ]
-        ids = [item for item in ids if item]
-        rows = await discovery.fetch_public_by_ids(ids)
-        row_by_id = {str(row["user_id"]): row for row in rows}
-        for hit in ts_hits:
-            doc = hit.get("document") or {}
-            hit_user_id = str(doc.get("user_id") or doc.get("id"))
-            if hit_user_id == viewer_id:
-                continue
-            if await PostgresMatchingRepository().is_blocked(viewer_id, hit_user_id):
-                continue
-            row = row_by_id.get(hit_user_id)
-            if row is None:
-                continue
-            hits.append(_snapshot_to_search_result(row))
-    else:
-        rows = await discovery.list_postgres_search(
-            destination_country=destination_country,
-            current_country=current_country,
-            viewer_id=viewer_id,
-            limit=limit,
-            offset=offset,
-        )
-        total = len(rows)
-        hits = [_snapshot_to_search_result(row) for row in rows if str(row["user_id"]) != viewer_id]
-
-    log_info(
-        logger,
-        "Explorer search completed",
-        request_id=request_id,
-        viewer_id=viewer_id,
-        hit_count=len(hits),
-        total=total,
-    )
-    return ExplorerSearchResponse(hits=hits, total=total, limit=limit, offset=offset)
-
-
-def _snapshot_to_search_result(row: dict) -> ExplorerSearchResult:
-    return ExplorerSearchResult(
-        user_id=UUID(str(row["user_id"])),
-        display_name=row.get("display_name"),
-        headline=row.get("headline"),
-        avatar_url=row.get("avatar_url"),
-        destination_country_iso=row.get("destination_country_iso"),
-        destination_city_name=row.get("destination_city_name"),
-        current_country_iso=row.get("current_country_iso"),
-        languages=list(row.get("languages") or []),
-        interests=list(row.get("interests") or []),
-        connection_availability=row.get("connection_availability") or "open",
-        last_active_at=row.get("last_active_at"),
+    return await search_explorers_by_route(
+        request=request,
+        user=user,
+        destination_country=destination_country,
+        q=q,
+        city_id=city_id,
+        current_country=current_country,
+        limit=limit,
+        offset=offset,
     )

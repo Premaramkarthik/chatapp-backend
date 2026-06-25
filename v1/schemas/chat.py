@@ -34,6 +34,20 @@ class ConversationResponse(BaseModel):
     business_context: dict | None = None
     created_at: datetime
     updated_at: datetime | None = None
+    can_chat: bool = False
+    is_archived: bool = False
+    can_archive: bool = False
+    can_reopen: bool = False
+
+
+class ConversationPermissions(BaseModel):
+    """Permission flags for a conversation (source of truth from backend)."""
+
+    status: str
+    can_chat: bool
+    is_archived: bool
+    can_archive: bool
+    can_reopen: bool
 
 
 class InboxPeer(BaseModel):
@@ -53,7 +67,11 @@ class InboxItem(BaseModel):
     connected_at: datetime | None = None
     peer: InboxPeer
     mapping: ConversationMappingSummary | None = None
-    can_chat: bool
+    status: str = "provisioning"
+    can_chat: bool = False
+    is_archived: bool = False
+    can_archive: bool = False
+    can_reopen: bool = False
 
 
 class InboxResponse(BaseModel):

@@ -50,3 +50,21 @@ class DisplayNameUpdateRequest(BaseModel):
             msg = "Display name must be at least 2 characters"
             raise ValueError(msg)
         return normalized
+
+
+class PublicUserProfileResponse(BaseModel):
+    """Public profile card for another user."""
+
+    user_id: UUID
+    display_name: str | None = None
+    account_mode: str | None = None
+    avatar_url: str | None = None
+    headline: str | None = None
+    home_label: str | None = None
+    destination_country_iso: str | None = None
+    destination_city_name: str | None = None
+    current_country_iso: str | None = None
+    languages: list[str] = Field(default_factory=list)
+    interests: list[str] = Field(default_factory=list)
+    connection_availability: str = "open"
+    last_active_at: datetime | None = None

@@ -6,6 +6,7 @@ from datetime import UTC, datetime, timedelta
 
 from core.config.settings import settings
 from core.observability.prometheus_metrics import AUTH_REFRESH_FAILURE_TOTAL
+from domains.auth.capabilities import missing_default_capabilities, refresh_token_set_if_needed
 from domains.auth.keycloak_client import keycloak_auth_client
 from domains.auth.models import AuthSession, AuthSessionStatus
 from domains.auth.security import TokenCipher, hash_secret
@@ -57,6 +58,12 @@ class AuthSessionResolver:
         if access_token is None:
             raise AuthenticationError("Authentication session is missing an access token")
         principal = await keycloak_verifier.verify_token(access_token)
+        if missing_default_capabilities(principal.roles):
+            await self._backfill_missing_capabilities(session, principal)
+            access_token = self._cipher.decrypt(session.access_token_encrypted)
+            if access_token is None:
+                raise AuthenticationError("Authentication session is missing an access token")
+            principal = await keycloak_verifier.verify_token(access_token)
         await self._repository.touch_session(
             session_id=session.id,
             idle_expires_at=min(
@@ -106,6 +113,53 @@ class AuthSessionResolver:
             raise
         finally:
             await release_refresh_lock(session.id)
+
+    async def _backfill_missing_capabilities(
+        self,
+        session: AuthSession,
+        principal: KeycloakPrincipal,
+    ) -> None:
+        """Assign missing default roles and refresh the session access token."""
+        refresh_token = self._cipher.decrypt(session.refresh_token_encrypted)
+        if refresh_token is None:
+            await keycloak_auth_client.assign_default_client_roles(user_id=principal.sub)
+            return
+
+        from domains.auth.models import TokenSet
+
+        token_set = TokenSet(
+            access_token=self._cipher.decrypt(session.access_token_encrypted) or "",
+            refresh_token=refresh_token,
+            id_token=self._cipher.decrypt(session.id_token_encrypted),
+            expires_at=session.access_expires_at,
+            refresh_expires_at=session.refresh_expires_at,
+        )
+        refreshed, _updated_principal = await refresh_token_set_if_needed(
+            keycloak_sub=principal.sub,
+            roles=principal.roles,
+            token_set=token_set,
+        )
+        if refreshed.access_token == token_set.access_token:
+            return
+
+        updated = await self._repository.update_session_tokens(
+            session_id=session.id,
+            access_token_encrypted=str(self._cipher.encrypt(refreshed.access_token)),
+            refresh_token_encrypted=self._cipher.encrypt(refreshed.refresh_token),
+            id_token_encrypted=self._cipher.encrypt(refreshed.id_token),
+            access_expires_at=refreshed.expires_at,
+            refresh_expires_at=refreshed.refresh_expires_at,
+            idle_expires_at=min(
+                datetime.now(UTC) + timedelta(seconds=settings.auth.session_idle_sec),
+                session.max_expires_at,
+            ),
+        )
+        if updated is not None:
+            session.access_token_encrypted = updated.access_token_encrypted
+            session.refresh_token_encrypted = updated.refresh_token_encrypted
+            session.id_token_encrypted = updated.id_token_encrypted
+            session.access_expires_at = updated.access_expires_at
+            session.refresh_expires_at = updated.refresh_expires_at
 
 
 auth_session_resolver = AuthSessionResolver()

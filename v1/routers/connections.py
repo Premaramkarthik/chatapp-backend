@@ -9,10 +9,23 @@ from fastapi import APIRouter, Depends, HTTPException, Request, status
 
 from core.logging.logger import get_logger, log_info, log_warning
 from domains.matrix.rooms.service import maybe_auto_provision_on_accept
+from infrastructure.database.repositories.connection_screens import ConnectionScreenRepository
 from infrastructure.database.repositories.matching import PostgresMatchingRepository
 from infrastructure.database.repositories.notifications import PostgresNotificationRepository
 from infrastructure.database.repositories.users import PostgresUserRepository
+from v1.dependencies.account_mode import ConnectorUser
 from v1.dependencies.auth import get_current_principal, require_capability
+from v1.schemas.connection_screens import (
+    ActiveConnectionItem,
+    ActiveConnectionsResponse,
+    ConnectionsSummaryResponse,
+    HistoryItem,
+    HistoryResponse,
+    IncomingRequestItem,
+    IncomingRequestsResponse,
+    SentRequestItem,
+    SentRequestsResponse,
+)
 from v1.schemas.connections import (
     ConnectionRequestCreate,
     ConnectionRequestResponse,
@@ -26,6 +39,7 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/v1/connections", tags=["connections"])
 CurrentPrincipal = Annotated[KeycloakPrincipal, Depends(get_current_principal)]
 MessageSender = Annotated[KeycloakPrincipal, Depends(require_capability("message:send"))]
+TripJoiner = Annotated[KeycloakPrincipal, Depends(require_capability("trip:join"))]
 
 
 async def _local_user_id(principal: KeycloakPrincipal) -> str:
@@ -308,3 +322,58 @@ async def remove_connection(
         user_id=user_id,
     )
     return UserConnectionResponse(**row)
+
+
+@router.get("/screens/summary", response_model=ConnectionsSummaryResponse)
+async def connections_screen_summary(
+    _: TripJoiner,
+    user: ConnectorUser,
+) -> ConnectionsSummaryResponse:
+    """Return tab counts for the connector connections hub."""
+    counts = await ConnectionScreenRepository().summary(user.id)
+    return ConnectionsSummaryResponse(**counts)
+
+
+@router.get("/screens/incoming", response_model=IncomingRequestsResponse)
+async def connections_screen_incoming(
+    _: TripJoiner,
+    user: ConnectorUser,
+) -> IncomingRequestsResponse:
+    """Return pending incoming requests with enriched peer cards."""
+    rows = await ConnectionScreenRepository().list_incoming(user.id)
+    return IncomingRequestsResponse(
+        items=[IncomingRequestItem(**row) for row in rows],
+    )
+
+
+@router.get("/screens/sent", response_model=SentRequestsResponse)
+async def connections_screen_sent(
+    _: TripJoiner,
+    user: ConnectorUser,
+) -> SentRequestsResponse:
+    """Return pending outgoing requests with enriched peer cards."""
+    rows = await ConnectionScreenRepository().list_sent(user.id)
+    return SentRequestsResponse(items=[SentRequestItem(**row) for row in rows])
+
+
+@router.get("/screens/active", response_model=ActiveConnectionsResponse)
+async def connections_screen_active(
+    _: TripJoiner,
+    user: ConnectorUser,
+) -> ActiveConnectionsResponse:
+    """Return active connections with enriched peer cards."""
+    rows = await ConnectionScreenRepository().list_active(user.id)
+    return ActiveConnectionsResponse(
+        items=[ActiveConnectionItem(**row) for row in rows],
+    )
+
+
+@router.get("/screens/history", response_model=HistoryResponse)
+async def connections_screen_history(
+    _: TripJoiner,
+    user: ConnectorUser,
+    limit: int = 50,
+) -> HistoryResponse:
+    """Return terminal requests and removed connections."""
+    rows = await ConnectionScreenRepository().list_history(user.id, limit=limit)
+    return HistoryResponse(items=[HistoryItem(**row) for row in rows])

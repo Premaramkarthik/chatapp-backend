@@ -11,7 +11,7 @@ Seeks access to people, places, products, opportunities, experiences, local know
 - **account_mode:** `explorer`
 - **Typical capability:** `trip:create`
 - **Profile table:** `explorer_profiles`
-- **Primary API surface:** `/v1/explorers/*` (profile, trips, current location)
+- **Primary API surface:** `/v1/explorers/*` (profile, trips, current location), `/v1/explorers/search/*` (discover connectors)
 - **Discoverability:** Can appear in search when profile, trip, privacy, and availability allow
 
 ### Connector
@@ -21,7 +21,7 @@ Enables access for others through local knowledge, recommendations, introduction
 - **account_mode:** `connector`
 - **Typical capability:** `trip:join`
 - **Profile table:** `connector_profiles`
-- **Primary API surface:** `/v1/connectors/profile`, `/v1/explorers/search` (browse discoverable explorers)
+- **Primary API surface:** `/v1/connectors/search/*` (discover explorers), `/v1/connectors/profile`
 
 There is no `receiver` role in this domain.
 
@@ -39,14 +39,14 @@ Role-specific routes enforce **both** Keycloak capabilities and `users.account_m
 
 | Capability | Intended role | Example endpoints |
 | --- | --- | --- |
-| `trip:create` | Explorer | `PUT /v1/explorers/profile`, `POST /v1/explorers/trips`, `PUT /v1/explorers/location`, `GET/PUT /v1/explorers/privacy` |
-| `trip:join` | Connector | `GET /v1/explorers/search`, `GET/PUT /v1/connectors/profile` |
+| `trip:create` | Explorer | `PUT /v1/explorers/profile`, `POST /v1/explorers/trips`, `PUT /v1/explorers/location`, `GET/PUT /v1/explorers/privacy`, `GET /v1/explorers/search/connectors`, `GET /v1/explorers/search/users` |
+| `trip:join` | Connector | `GET /v1/connectors/search/explorers`, `GET /v1/connectors/search/users`, `GET/PUT /v1/connectors/profile` |
 | `message:send` | Either | `/v1/connections/*`, `/v1/blocks/*`, `/v1/reports/*`, `/v1/notifications/*` |
 
 Account mode gates:
 
 - Connectors receive **403** on `GET/PUT /v1/explorers/profile`, trips, location, and privacy.
-- Explorers receive **403** on `GET /v1/explorers/search` and `GET/PUT /v1/connectors/profile`.
+- Explorers receive **403** on `GET /v1/connectors/search/*`, `GET/PUT /v1/connectors/profile`, and the deprecated `GET /v1/explorers/search` alias.
 
 `PATCH /v1/users/account-mode` atomically sets `account_mode` and bootstraps the required profile row (and explorer privacy defaults) in one SQL transaction via `fn_users` mode 5 + `social_bootstrap_role_context`.
 
@@ -66,8 +66,18 @@ Session (`GET /v1/auth/session`) includes `onboarding_complete` and mode-specifi
 ### Connector — find explorers
 
 1. Sign up / onboarding with `account_mode: connector`
-2. `GET /v1/explorers/search?destination_country=XX` with `trip:join`
-3. Send connection request via `/v1/connections/*`
+2. `GET /v1/connectors/search/explorers?destination_country=XX` with `trip:join` (route search)
+3. Optional `GET /v1/connectors/search/users?q=...` (username or display name)
+4. Send connection request via `/v1/connections/*`
+
+### Explorer — find connectors
+
+1. Sign up / onboarding with `account_mode: explorer`
+2. `GET /v1/explorers/search/connectors?destination_country=XX` with `trip:create` (route search)
+3. Optional `GET /v1/explorers/search/users?q=...` (username or display name)
+4. Send connection request via `/v1/connections/*`
+
+Deprecated: `GET /v1/explorers/search` remains as a temporary alias for connector route search.
 
 ## Entity relationships
 

@@ -19,6 +19,7 @@ from infrastructure.keycloak.google_idp_config import (
 from infrastructure.keycloak.realm_bootstrap import ensure_keycloak_realm
 from infrastructure.keycloak.smtp_config import ensure_keycloak_smtp
 from infrastructure.keycloak.startup_validation import validate_keycloak_startup
+from infrastructure.matrix.startup_validation import validate_matrix_startup
 from infrastructure.redis.cache import auth_redis_cache
 from infrastructure.typesense.collections import ensure_all_collections
 from v1.middleware import setup_middleware
@@ -27,7 +28,10 @@ from v1.routers import (
     blocks,
     chat,
     connections,
+    connector_search,
     connectors,
+    explorer_connections,
+    explorer_search,
     explorers,
     geo,
     health,
@@ -51,6 +55,8 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
             await ensure_keycloak_web_client()
             await ensure_keycloak_google_idp()
             await validate_keycloak_startup()
+        if settings.matrix.enabled:
+            await validate_matrix_startup()
         jwks_refresh_manager.start()
         if settings.typesense.enabled:
             await asyncio.to_thread(ensure_all_collections)
@@ -89,7 +95,10 @@ def create_app() -> FastAPI:
     api.include_router(auth.router)
     api.include_router(users.router)
     api.include_router(explorers.router)
+    api.include_router(explorer_connections.router)
+    api.include_router(explorer_search.router)
     api.include_router(connectors.router)
+    api.include_router(connector_search.router)
     api.include_router(connections.router)
     api.include_router(blocks.router)
     api.include_router(reports.router)

@@ -13,6 +13,8 @@ from domains.search.analytics.service import SearchAnalyticsService
 from domains.search.filters import TravelerSearchFilters
 from domains.search.recommendations.service import RecommendationService
 from domains.search.service import SearchService
+from domains.users.user import User
+from infrastructure.database.repositories.users import PostgresUserRepository
 from v1.dependencies.auth import require_capability
 from v1.schemas.principal import KeycloakPrincipal
 from v1.schemas.search import (
@@ -37,7 +39,19 @@ logger = get_logger(__name__)
 router = APIRouter(prefix="/v1/search", tags=["search"])
 
 TripSearcher = Annotated[KeycloakPrincipal, Depends(require_capability("trip:join"))]
-AuthenticatedUser = Annotated[KeycloakPrincipal, Depends(require_capability("profile:update"))]
+
+
+async def _authenticated_user(
+    principal: Annotated[KeycloakPrincipal, Depends(require_capability("profile:update"))],
+) -> User:
+    """Resolve the local user row for search routes that need a Postgres user id."""
+    user = await PostgresUserRepository().get_by_keycloak_sub(principal.sub)
+    if user is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="User not found")
+    return user
+
+
+AuthenticatedUser = Annotated[User, Depends(_authenticated_user)]
 
 
 def _search_service() -> SearchService:

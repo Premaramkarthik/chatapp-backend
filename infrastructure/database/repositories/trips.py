@@ -28,13 +28,16 @@ class PostgresTripRepository:
                 return value.isoformat()
             return value
 
+        def _destination_value(dest: dict[str, Any]) -> dict[str, Any]:
+            return {key: _date_value(value) for key, value in dest.items()}
+
         payload: dict[str, Any] = {
             "user_id": user_id,
             "title": title,
             "start_date": _date_value(start_date),
             "end_date": _date_value(end_date),
             "is_primary": is_primary,
-            "destinations": destinations,
+            "destinations": [_destination_value(dest) for dest in destinations],
         }
         result = await call_json_function("fn_travel_plans", 2, payload)
         row = row_from_jsonb(result)

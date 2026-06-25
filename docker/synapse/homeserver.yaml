@@ -63,6 +63,18 @@ rc_registration:
   per_second: 0.17
   burst_count: 3
 
+# ponytail: relaxed for local dev — uvicorn --reload logs in on every startup
+rc_login:
+  address:
+    per_second: 1
+    burst_count: 100
+  account:
+    per_second: 1
+    burst_count: 100
+  failed_attempts:
+    per_second: 0.5
+    burst_count: 20
+
 search:
   enabled: true
 

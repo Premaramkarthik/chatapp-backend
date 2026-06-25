@@ -7,6 +7,7 @@ from dataclasses import dataclass
 import httpx
 
 from core.config.settings import settings
+from infrastructure.matrix.admin import synapse_admin_client
 
 
 @dataclass(frozen=True)
@@ -46,5 +47,17 @@ async def sliding_sync_health() -> MatrixHealthResult:
             if response.status_code in (401, 403, 405):
                 return MatrixHealthResult(ok=True, detail="ok")
             return MatrixHealthResult(ok=False, detail=f"status={response.status_code}")
+    except Exception as exc:
+        return MatrixHealthResult(ok=False, detail=f"{type(exc).__name__}: {exc}")
+
+
+async def matrix_admin_health() -> MatrixHealthResult:
+    """Check Synapse Admin API access via service admin credentials."""
+    if not settings.matrix.enabled:
+        return MatrixHealthResult(ok=True, detail="disabled")
+    try:
+        await synapse_admin_client.get_token()
+        await synapse_admin_client.verify_admin_access()
+        return MatrixHealthResult(ok=True, detail="ok")
     except Exception as exc:
         return MatrixHealthResult(ok=False, detail=f"{type(exc).__name__}: {exc}")

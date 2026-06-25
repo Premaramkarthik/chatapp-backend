@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from infrastructure.database.connection import call_json_function
+from infrastructure.database.connection import call_json_function, fetchrow
 from infrastructure.database.jsonb_helpers import list_from_jsonb, row_from_jsonb
 
 
@@ -44,13 +44,13 @@ class PostgresConversationRepository:
         self,
         user_id: str,
         *,
-        include_archived: bool = False,
+        inbox_status: str = "active",
     ) -> list[dict[str, Any]]:
         """List active connections with peer and mapping metadata."""
         result = await call_json_function(
             "fn_matrix_room_mappings",
             3,
-            {"user_id": user_id, "include_archived": include_archived},
+            {"user_id": user_id, "status": inbox_status},
         )
         return list_from_jsonb(result)
 
@@ -79,20 +79,35 @@ class PostgresConversationRepository:
             raise RuntimeError("fn_matrix_room_mappings mode 4 returned no row")
         return row
 
+    async def is_user_archived(self, user_id: str, connection_id: str) -> bool:
+        """Return whether the viewer has archived this connection in their inbox."""
+        result = await fetchrow(
+            """
+            SELECT EXISTS (
+                SELECT 1 FROM matrix_inbox_archive
+                WHERE user_id = $1::uuid
+                  AND user_connection_id = $2::uuid
+            ) AS archived
+            """,
+            user_id,
+            connection_id,
+        )
+        return bool(result["archived"]) if result else False
+
     async def archive_for_connection(
         self,
         connection_id: str,
         *,
-        archived_by_user_id: str | None = None,
+        user_id: str,
         reason: str | None = None,
     ) -> dict[str, Any]:
-        """Mark mapping archived for a connection."""
+        """Mark connection archived in the viewer's inbox."""
         result = await call_json_function(
             "fn_matrix_room_mappings",
             5,
             {
                 "user_connection_id": connection_id,
-                "archived_by_user_id": archived_by_user_id,
+                "user_id": user_id,
                 "reason": reason,
             },
         )
@@ -102,23 +117,23 @@ class PostgresConversationRepository:
         return row
 
     async def archive_between_users(self, user_id: str, other_user_id: str) -> None:
-        """Archive conversation mapping when users share an active connection."""
+        """Archive conversation in the blocker's inbox when users share an active connection."""
         from infrastructure.database.repositories.matching import PostgresMatchingRepository
 
         conn = await PostgresMatchingRepository().get_connection_between(user_id, other_user_id)
         if conn is None:
             return
         try:
-            await self.archive_for_connection(str(conn["id"]), archived_by_user_id=user_id)
+            await self.archive_for_connection(str(conn["id"]), user_id=user_id, reason="user_block")
         except RuntimeError:
             return
 
-    async def reopen_for_connection(self, connection_id: str) -> dict[str, Any]:
-        """Reopen archived mapping."""
+    async def reopen_for_connection(self, connection_id: str, *, user_id: str) -> dict[str, Any]:
+        """Remove connection from the viewer's archived inbox."""
         result = await call_json_function(
             "fn_matrix_room_mappings",
             6,
-            {"user_connection_id": connection_id},
+            {"user_connection_id": connection_id, "user_id": user_id},
         )
         row = row_from_jsonb(result)
         if row is None:

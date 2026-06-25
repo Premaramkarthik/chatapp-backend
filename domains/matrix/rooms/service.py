@@ -7,7 +7,8 @@ from typing import Any
 from core.config.settings import settings
 from core.logging.logger import get_logger, log_info, log_warning
 from core.observability.prometheus_metrics import MATRIX_ROOM_PROVISION_TOTAL
-from domains.matrix.provisioning.service import MatrixProvisioningService
+from domains.chat.permissions import is_provisioned_room_id
+from domains.matrix.provisioning.service import MatrixProvisionError, MatrixProvisioningService
 from infrastructure.database.connection import call_json_function
 from infrastructure.database.repositories.conversations import PostgresConversationRepository
 from infrastructure.database.repositories.matrix_users import PostgresMatrixUserRepository
@@ -58,7 +59,7 @@ class MatrixRoomService:
             connection_id=connection_id,
             created_by_user_id=created_by_user_id,
         )
-        if mapping.get("status") == "active" and str(mapping.get("room_id", "")).startswith("!"):
+        if mapping.get("status") == "active" and is_provisioned_room_id(mapping.get("room_id")):
             MATRIX_ROOM_PROVISION_TOTAL.labels(outcome="existing").inc()
             return mapping
 
@@ -131,37 +132,42 @@ class MatrixRoomService:
         self,
         *,
         connection_id: str,
-        archived_by_user_id: str | None = None,
+        user_id: str,
         reason: str | None = None,
     ) -> dict[str, Any]:
-        """Archive a DM room mapping."""
+        """Archive a connection in the user's inbox."""
         return await self._conversations.archive_for_connection(
             connection_id,
-            archived_by_user_id=archived_by_user_id,
+            user_id=user_id,
             reason=reason,
         )
 
-    async def reopen_for_connection(self, *, connection_id: str) -> dict[str, Any]:
-        """Reopen an archived DM room mapping."""
-        return await self._conversations.reopen_for_connection(connection_id)
+    async def reopen_for_connection(
+        self,
+        *,
+        connection_id: str,
+        user_id: str,
+    ) -> dict[str, Any]:
+        """Remove a connection from the user's archived inbox."""
+        return await self._conversations.reopen_for_connection(connection_id, user_id=user_id)
 
     async def archive_connection_room(
         self,
         connection_id: str,
         *,
-        archived_by_user_id: str | None = None,
+        user_id: str,
         reason: str | None = None,
     ) -> dict[str, Any]:
-        """Archive a DM room mapping (router alias)."""
+        """Archive a connection in the user's inbox (router alias)."""
         return await self.archive_for_connection(
             connection_id=connection_id,
-            archived_by_user_id=archived_by_user_id,
+            user_id=user_id,
             reason=reason,
         )
 
-    async def reopen_connection_room(self, connection_id: str) -> dict[str, Any]:
-        """Reopen an archived DM room mapping (router alias)."""
-        return await self.reopen_for_connection(connection_id=connection_id)
+    async def reopen_connection_room(self, connection_id: str, *, user_id: str) -> dict[str, Any]:
+        """Remove a connection from the user's archived inbox (router alias)."""
+        return await self.reopen_for_connection(connection_id=connection_id, user_id=user_id)
 
 
 matrix_room_service = MatrixRoomService()
@@ -182,5 +188,21 @@ async def maybe_auto_provision_on_accept(
             created_by_user_id=accepted_by_user_id,
             request_id=request_id,
         )
-    except MatrixRoomProvisionError:
-        return
+    except (MatrixRoomProvisionError, MatrixProvisionError) as exc:
+        log_warning(
+            logger,
+            "Matrix auto-provision skipped after connection accept",
+            matrix_category="room_events",
+            request_id=request_id,
+            connection_id=str(connection.get("id", "")),
+            reason=str(exc),
+        )
+    except Exception as exc:
+        log_warning(
+            logger,
+            "Matrix auto-provision failed after connection accept",
+            matrix_category="room_events",
+            request_id=request_id,
+            connection_id=str(connection.get("id", "")),
+            reason=str(exc),
+        )

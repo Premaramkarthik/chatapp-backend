@@ -18,6 +18,7 @@ from core.observability.prometheus_metrics import (
     LOGIN_SUCCESS_TOTAL,
     SIGNUP_SUCCESS_TOTAL,
 )
+from domains.auth.capabilities import refresh_token_set_if_needed
 from domains.auth.email_verification import AppEmailVerificationIssuer
 from domains.auth.keycloak_client import KeycloakAuthClient, keycloak_auth_client
 from domains.auth.models import (
@@ -242,6 +243,11 @@ class AuthService:
             )
             raise AuthenticationError("Invalid email or password") from None
         principal = await keycloak_verifier.verify_token(token_set.access_token)
+        token_set, principal = await refresh_token_set_if_needed(
+            keycloak_sub=principal.sub,
+            roles=principal.roles,
+            token_set=token_set,
+        )
         signin_state = SigninState(
             id="password",
             state_hash="",
@@ -944,6 +950,11 @@ class AuthService:
         )
         log_info(logger, "OAuth authorization code exchanged for tokens", request_id=request_id)
         principal = await keycloak_verifier.verify_token(token_set.access_token)
+        token_set, principal = await refresh_token_set_if_needed(
+            keycloak_sub=principal.sub,
+            roles=principal.roles,
+            token_set=token_set,
+        )
         log_info(
             logger,
             "OAuth user identity parsed from token",
