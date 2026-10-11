@@ -82,9 +82,12 @@ async def run_migrations(
     repair_changed: bool = False,
 ) -> list[MigrationResult]:
     """Apply unapplied SQL files in filename order."""
+    if repair_changed and settings.app.environment not in {"local", "development", "dev", "test"}:
+        raise RuntimeError("--repair-changed is restricted to local/development databases")
     migration_files = await asyncio.to_thread(_load_migration_files, migrations_dir)
     conn = await asyncpg.connect(dsn=dsn)
     try:
+        await conn.execute("SELECT pg_advisory_lock(734921001)")
         await conn.execute(SCHEMA_MIGRATIONS_SQL)
         results: list[MigrationResult] = []
         for migration in migration_files:
@@ -129,13 +132,17 @@ async def run_migrations(
 
 
 def _load_migration_files(migrations_dir: Path) -> list[MigrationFile]:
+    paths = sorted(migrations_dir.glob("*.sql"))
+    versions = [path.name.split("_", 1)[0] for path in paths]
+    if len(set(versions)) != len(versions) or any(not v.isdigit() for v in versions):
+        raise RuntimeError("Migration versions must be unique numeric prefixes")
     return [
         MigrationFile(
             filename=path.name,
             checksum=_checksum(path),
             sql=path.read_text(encoding="utf-8"),
         )
-        for path in sorted(migrations_dir.glob("*.sql"))
+        for path in paths
     ]
 
 

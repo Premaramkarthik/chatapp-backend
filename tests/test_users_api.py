@@ -248,17 +248,22 @@ def test_update_display_name_requires_auth(monkeypatch: pytest.MonkeyPatch) -> N
     assert response.status_code == 401
 
 
-def test_delete_my_account_returns_204(
+def test_delete_my_account_returns_local_and_remote_completion(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     """Authenticated users can delete their account."""
     deleted = False
 
     class FakeAuthService:
-        async def delete_account(self, *, principal_sub: str, request) -> None:
+        async def delete_account(self, *, principal_sub: str, request) -> dict:
             nonlocal deleted
             deleted = True
             assert principal_sub == "google-sub-123"
+            return {
+                "local_revocation": "complete",
+                "remote_termination": "complete",
+                "operation_id": "op",
+            }
 
     monkeypatch.setattr(
         "v1.middleware.authentication.settings.middleware.auth_enabled",
@@ -272,5 +277,6 @@ def test_delete_my_account_returns_204(
     finally:
         app.dependency_overrides.clear()
 
-    assert response.status_code == 204
+    assert response.status_code == 200
+    assert response.json()["local_revocation"] == "complete"
     assert deleted is True

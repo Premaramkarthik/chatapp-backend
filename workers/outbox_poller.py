@@ -6,10 +6,6 @@ import asyncio
 
 from core.config.settings import settings
 from core.logging.logger import get_logger, log_warning
-from core.observability.prometheus_metrics import (
-    BACKGROUND_JOB_FAILURES_TOTAL,
-    BACKGROUND_JOB_RUNS_TOTAL,
-)
 from infrastructure.database.repositories.discovery import PostgresDiscoveryRepository
 from workers.search_tasks import (
     delete_search_document,
@@ -65,7 +61,6 @@ async def run_outbox_poller_loop(
     """Background loop claiming outbox rows until stop_event is set."""
     while stop_event is None or not stop_event.is_set():
         try:
-            BACKGROUND_JOB_RUNS_TOTAL.labels(job="search_outbox_poller").inc()
             processed = await poll_outbox_once()
             if processed == 0:
                 if stop_event is not None:
@@ -78,7 +73,6 @@ async def run_outbox_poller_loop(
         except asyncio.CancelledError:
             raise
         except Exception as exc:
-            BACKGROUND_JOB_FAILURES_TOTAL.labels(job="search_outbox_poller").inc()
             log_warning(logger, "Outbox poller loop error", error=str(exc))
             await asyncio.sleep(interval_sec)
 
@@ -92,7 +86,6 @@ def main() -> None:
 
     async def _loop() -> None:
         while True:
-            BACKGROUND_JOB_RUNS_TOTAL.labels(job="search_outbox_poller").inc()
             await poll_outbox_once()
             await asyncio.sleep(5.0)
 

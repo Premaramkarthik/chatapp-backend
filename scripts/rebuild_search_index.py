@@ -14,7 +14,6 @@ if str(REPO_ROOT) not in sys.path:
 
 from core.config.settings import settings  # noqa: E402
 from core.logging.logger import get_logger  # noqa: E402
-from core.observability.prometheus_metrics import SEARCH_REINDEX_DURATION_SECONDS  # noqa: E402
 from infrastructure.database.connection import close_db, init_db  # noqa: E402
 from infrastructure.database.repositories.search_index import SearchIndexRepository  # noqa: E402
 from infrastructure.typesense.collections import ensure_all_collections  # noqa: E402
@@ -146,7 +145,6 @@ async def main_async(args: argparse.Namespace) -> int:
     finally:
         await close_db()
     duration = time.perf_counter() - started
-    SEARCH_REINDEX_DURATION_SECONDS.labels(collection=args.collection).observe(duration)
     logger.info(
         "Search reindex completed",
         collection=args.collection,

@@ -40,11 +40,49 @@ class MatrixEncryptionService:
         device_id: str,
     ) -> dict[str, Any]:
         """Mark a device as verified."""
-        return await self._devices.verify(user_id=user_id, device_id=device_id)
+        from fastapi import HTTPException
+
+        raise HTTPException(410, detail={"code": "matrix_sdk_verification_required"})
 
     async def delete_device(self, *, user_id: str, device_id: str) -> dict[str, Any] | None:
         """Remove device metadata."""
-        return await self._devices.delete(user_id=user_id, device_id=device_id)
+        from fastapi import HTTPException
+
+        from domains.auth.remote_operations import complete_operation
+        from infrastructure.database.connection import get_pool
+
+        pool = await get_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT id FROM users WHERE id=$1::uuid FOR UPDATE", user_id)
+            row = await conn.fetchrow(
+                "SELECT mxid FROM matrix_user_mappings WHERE user_id=$1::uuid", user_id
+            )
+            if not row:
+                return None
+            await conn.execute(
+                """UPDATE matrix_sessions SET status='revoked' WHERE user_id=$1::uuid AND
+                device_id=$2""",
+                user_id,
+                device_id,
+            )
+            op = await conn.fetchval(
+                "INSERT INTO auth_remote_operations(payload) VALUES($1::jsonb) RETURNING id",
+                {
+                    "scope": "matrix_devices",
+                    "matrix_devices": [{"mxid": row["mxid"], "device_id": device_id}],
+                },
+            )
+        if not await complete_operation(str(op)):
+            raise HTTPException(
+                202,
+                detail={
+                    "local_revocation": "complete",
+                    "remote_termination": "pending",
+                    "operation_id": str(op),
+                },
+            )
+        await self._devices.delete(user_id=user_id, device_id=device_id)
+        return {"device_id": device_id}
 
     async def init_key_backup(
         self,
@@ -82,7 +120,8 @@ class MatrixEncryptionService:
         devices = await self.list_devices(user_id)
         verified = [d for d in devices if d.get("trust_level") == "verified"]
         return {
-            "cross_signing_ready": len(verified) > 0,
+            "cross_signing_ready": False,
+            "advisory_only": True,
             "verified_device_count": len(verified),
             "device_count": len(devices),
         }

@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hmac
 from collections.abc import Callable
 from typing import Annotated
 
@@ -15,6 +16,30 @@ from v1.schemas.principal import KeycloakPrincipal
 
 bearer_scheme = HTTPBearer(auto_error=False)
 BearerCredentials = Annotated[HTTPAuthorizationCredentials | None, Security(bearer_scheme)]
+
+
+async def get_revocation_session(request: Request) -> AuthSession:
+    """Prove session ownership and its bound CSRF secret without remote authorization."""
+    from core.config.settings import settings
+    from domains.auth.security import hash_secret
+    from domains.auth.session_resolver import auth_session_resolver
+    from v1.utils.base import AuthenticationError
+
+    token = request.cookies.get(settings.auth.cookie_name)
+    if not token:
+        raise HTTPException(401, detail="Session cookie authentication is required")
+    try:
+        session = await auth_session_resolver.resolve_for_revocation(token)
+    except AuthenticationError as exc:
+        raise HTTPException(401, detail={"code": exc.code}) from exc
+    except Exception as exc:
+        raise HTTPException(503, detail={"code": "local_revocation_failed"}) from exc
+    csrf = request.headers.get(settings.auth.csrf_header_name, "")
+    if not session.csrf_token_hash or not hmac.compare_digest(
+        hash_secret(csrf), session.csrf_token_hash
+    ):
+        raise HTTPException(403, detail="Invalid CSRF token")
+    return session
 
 
 async def get_current_principal(
@@ -32,7 +57,15 @@ async def get_current_principal(
             detail="Missing bearer token",
             headers={"WWW-Authenticate": "Bearer"},
         )
-    return await keycloak_verifier.verify_token(credentials.credentials)
+    principal = await keycloak_verifier.verify_token(credentials.credentials)
+    from infrastructure.database.repositories.users import PostgresUserRepository
+    from infrastructure.keycloak.session_control import session_control
+
+    await session_control.check(principal)
+    user = await PostgresUserRepository().get_by_keycloak_sub(principal.sub)
+    if user is None or user.status not in {"active", "pending_profile_setup"}:
+        raise HTTPException(401, detail="Account is disabled or not provisioned")
+    return principal
 
 
 async def get_current_auth_session(request: Request) -> AuthSession:

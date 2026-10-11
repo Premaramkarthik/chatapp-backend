@@ -1,14 +1,14 @@
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
       POSTGRES_DB: postgres
-      chatapp_DB_USER: chatapp
-      chatapp_DB_PASSWORD: chatapp
+      APP_DB_PASSWORD: ${DB_PASSWORD:-chatapp}
+      KEYCLOAK_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-dev-keycloak-db}
     ports:
-      - "${POSTGRES_HOST_PORT:-5433}:5432"
+      - "127.0.0.1:${POSTGRES_HOST_PORT:-5433}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./docker/postgres/init:/docker-entrypoint-initdb.d:ro
@@ -34,7 +34,11 @@ services:
   #   restart: "no"
 
   keycloak:
-    image: quay.io/keycloak/keycloak:26.0
+    image: paripath-keycloak:local
+    build:
+      context: .
+      dockerfile: docker/keycloak/Dockerfile
+    extra_hosts: ["host.docker.internal:host-gateway"]
     command: ["start-dev"]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: ${KC_BOOTSTRAP_ADMIN_USERNAME:-admin}
@@ -42,24 +46,25 @@ services:
       KC_DB: postgres
       KC_DB_URL_HOST: postgres
       KC_DB_URL_DATABASE: keycloak
-      KC_DB_USERNAME: chatapp
-      KC_DB_PASSWORD: chatapp
+      KC_DB_USERNAME: keycloak
+      KC_DB_PASSWORD: ${KEYCLOAK_DB_PASSWORD:-dev-keycloak-db}
+      KC_HOSTNAME: http://localhost:${KEYCLOAK_HOST_PORT:-8180}
       KC_HTTP_ENABLED: "true"
       KC_HOSTNAME_STRICT: "false"
     depends_on:
       postgres:
         condition: service_healthy
     ports:
-      - "${KEYCLOAK_HOST_PORT:-8180}:8080"
+      - "127.0.0.1:${KEYCLOAK_HOST_PORT:-8180}:8080"
     volumes:
       - ./docker/keycloak/themes:/opt/keycloak/themes:ro
 
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499
     command: ["redis-server", "--appendonly", "yes"]
     ports:
-      - "${REDIS_HOST_PORT:-6379}:6379"
+      - "127.0.0.1:${REDIS_HOST_PORT:-6379}:6379"
     volumes:
       - redis_data:/data
     healthcheck:
@@ -69,17 +74,18 @@ services:
       retries: 12
 
   redisinsight:
-    image: redis/redisinsight:latest
+    profiles: [tools]
+    image: redis/redisinsight:latest@sha256:b5e19ee240abef6edb435871b90ff8a210995422e8e018ab61c0339d318a1f84
     depends_on:
       redis:
         condition: service_healthy
     ports:
-      - "${REDISINSIGHT_HOST_PORT:-5540}:5540"
+      - "127.0.0.1:${REDISINSIGHT_HOST_PORT:-5540}:5540"
     volumes:
       - redisinsight_data:/data
 
   synapse-db:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
     environment:
       POSTGRES_USER: synapse
       POSTGRES_PASSWORD: synapse
@@ -87,7 +93,6 @@ services:
       POSTGRES_INITDB_ARGS: "--encoding=UTF-8 --lc-collate=C --lc-ctype=C"
     volumes:
       - synapse_db_data:/var/lib/postgresql/data
-      - ./docker/postgres/init-syncv3-db.sh:/docker-entrypoint-initdb.d/20-init-syncv3-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U synapse -d synapse"]
       interval: 5s
@@ -95,18 +100,21 @@ services:
       retries: 12
 
   synapse:
-    image: matrixdotorg/synapse:latest
+    environment:
+      PYTHONPATH: /config
+    extra_hosts: ["host.docker.internal:host-gateway"]
+    image: matrixdotorg/synapse:latest@sha256:abeb932f2a9293fcbb886d5ddd0f55a34d532708ebb8dc5642934dd91ca26237
     depends_on:
       synapse-db:
         condition: service_healthy
       redis:
         condition: service_healthy
     ports:
-      - "${SYNAPSE_HOST_PORT:-8008}:8008"
-      - "${SYNAPSE_METRICS_PORT:-9001}:9000"
+      - "127.0.0.1:${SYNAPSE_HOST_PORT:-8008}:8008"
     volumes:
       - ./docker/synapse/homeserver.yaml:/data/homeserver.yaml:ro
       - ./docker/synapse/log.config:/data/log.config:ro
+      - ./docker/synapse/matrix_log_redaction.py:/config/matrix_log_redaction.py:ro
       - synapse_data:/data
     healthcheck:
       test: ["CMD-SHELL", "curl -sf http://127.0.0.1:8008/health || exit 1"]
@@ -115,33 +123,8 @@ services:
       retries: 18
       start_period: 60s
 
-  sliding-sync:
-    image: ghcr.io/matrix-org/sliding-sync:latest
-    depends_on:
-      synapse:
-        condition: service_healthy
-      synapse-db:
-        condition: service_healthy
-    ports:
-      - "${SLIDING_SYNC_HOST_PORT:-8090}:8090"
-    environment:
-      SYNCV3_SERVER: http://synapse:8008
-      SYNCV3_DB: postgres://synapse:synapse@synapse-db:5432/syncv3?sslmode=disable
-      SYNCV3_SECRET: ${SLIDING_SYNC_SECRET:-dev-sliding-sync-secret-change-me}
-      SYNCV3_BINDADDR: 0.0.0.0:8090
-    healthcheck:
-      test:
-        [
-          "CMD-SHELL",
-          "curl -sf -o /dev/null -X POST http://127.0.0.1:8090/_matrix/client/unstable/org.matrix.msc3575/sync -w '%{http_code}' | grep -q 401",
-        ]
-      interval: 10s
-      timeout: 5s
-      retries: 12
-      start_period: 30s
-
   synapse-bootstrap:
-    image: matrixdotorg/synapse:latest
+    image: matrixdotorg/synapse:latest@sha256:abeb932f2a9293fcbb886d5ddd0f55a34d532708ebb8dc5642934dd91ca26237
     depends_on:
       synapse:
         condition: service_healthy
@@ -164,10 +147,10 @@ services:
     restart: "no"
 
   typesense:
-    image: typesense/typesense:30.2
+    image: typesense/typesense:30.2@sha256:610f2d34b1f93d00762869da2c67736775e5798d19a2c8b91b014b8a0cc1e110
     command: ["--data-dir", "/data", "--api-key=${TYPESENSE_API_KEY:-dev-typesense-api-key}", "--enable-cors"]
     ports:
-      - "${TYPESENSE_HOST_PORT:-8108}:8108"
+      - "127.0.0.1:${TYPESENSE_HOST_PORT:-8108}:8108"
     volumes:
       - typesense_data:/data
     healthcheck:
@@ -217,25 +200,26 @@ services:
   # api (uvicorn): run locally for dev — `uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000`
 
   # reverse-proxy:
-  #   image: nginx:1.27-alpine
+  #   image: nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10
   #   depends_on:
   #     - api
   #   ports:
-  #     - "8088:80"
+  #     - "127.0.0.1:8088:80"
   #   volumes:
   #     - ./docker/nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
 
   adminer:
-    image: adminer:4
+    image: adminer:4@sha256:c1c24d89d06fcb8fc0fb5a049240dc292ff4a121ae05d7e74d64b58c421d2921
     depends_on:
       - postgres
     ports:
-      - "8081:8080"
+      - "127.0.0.1:8081:8080"
     profiles:
       - tools
 
   pgadmin:
-    image: dpage/pgadmin4:8
+    profiles: [tools]
+    image: dpage/pgadmin4:8@sha256:8a68677a97b8c8d1427dc915672a26d2c4a04376916a68256f53d669d6171be7
     environment:
       PGADMIN_DEFAULT_EMAIL: ${PGADMIN_DEFAULT_EMAIL:-admin@example.com}
       PGADMIN_DEFAULT_PASSWORD: ${PGADMIN_DEFAULT_PASSWORD:-admin}
@@ -246,89 +230,11 @@ services:
       postgres:
         condition: service_healthy
     ports:
-      - "${PGADMIN_HOST_PORT:-5050}:80"
+      - "127.0.0.1:${PGADMIN_HOST_PORT:-5050}:80"
     volumes:
       - pgadmin_data:/var/lib/pgadmin
       - ./docker/pgadmin/servers.json:/pgadmin4/servers.json:ro
 
-  prometheus:
-    image: prom/prometheus:v3.2.1
-    profiles:
-      - observability
-    ports:
-      - "9090:9090"
-    volumes:
-      - ./docker/observability/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
-      - ./docker/observability/prometheus/alerts.yml:/etc/prometheus/alerts.yml:ro
-      - prometheus_data:/prometheus
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-
-  grafana:
-    image: grafana/grafana:11.5.2
-    profiles:
-      - observability
-    ports:
-      - "3001:3000"
-    environment:
-      GF_SECURITY_ADMIN_USER: admin
-      GF_SECURITY_ADMIN_PASSWORD: admin
-      GF_USERS_DEFAULT_THEME: dark
-    volumes:
-      - grafana_data:/var/lib/grafana
-      - ./docker/observability/grafana/provisioning:/etc/grafana/provisioning:ro
-      - ./docker/observability/grafana/dashboards:/var/lib/grafana/dashboards:ro
-    depends_on:
-      - prometheus
-      - loki
-      - tempo
-
-  loki:
-    image: grafana/loki:3.4.2
-    profiles:
-      - observability
-    ports:
-      - "3100:3100"
-    command: -config.file=/etc/loki/loki.yml
-    volumes:
-      - ./docker/observability/loki/loki.yml:/etc/loki/loki.yml:ro
-      - loki_data:/loki
-
-  promtail:
-    image: grafana/promtail:3.4.2
-    profiles:
-      - observability
-    volumes:
-      - ./docker/observability/promtail/promtail.yml:/etc/promtail/config.yml:ro
-      - ./logs:/var/log/chatapp:ro
-    command: -config.file=/etc/promtail/config.yml
-    depends_on:
-      - loki
-
-  tempo:
-    image: grafana/tempo:2.7.1
-    profiles:
-      - observability
-    ports:
-      - "4317:4317"
-      - "4318:4318"
-      - "3200:3200"
-    command: ["-config.file=/etc/tempo/tempo.yml"]
-    volumes:
-      - ./docker/observability/tempo/tempo.yml:/etc/tempo/tempo.yml:ro
-      - tempo_data:/var/tempo
-
-  cadvisor:
-    image: gcr.io/cadvisor/cadvisor:v0.51.0
-    profiles:
-      - observability
-    ports:
-      - "8089:8080"
-    volumes:
-      - /:/rootfs:ro
-      - /var/run:/var/run:ro
-      - /sys:/sys:ro
-      - /var/lib/docker/:/var/lib/docker:ro
 
 volumes:
   postgres_data:
@@ -338,7 +244,3 @@ volumes:
   redisinsight_data:
   pgadmin_data:
   typesense_data:
-  prometheus_data:
-  grafana_data:
-  loki_data:
-  tempo_data:

@@ -19,12 +19,6 @@ YAML_ENV_MAP: dict[tuple[str, ...], str] = {
     ("app", "skip_startup_integrations"): "APP_SKIP_STARTUP_INTEGRATIONS",
     ("logging", "level"): "LOG_LEVEL",
     ("logging", "file"): "LOG_FILE",
-    ("observability", "enabled"): "OBSERVABILITY_ENABLED",
-    ("observability", "service_name"): "OTEL_SERVICE_NAME",
-    ("observability", "otlp_endpoint"): "OTEL_EXPORTER_OTLP_ENDPOINT",
-    ("observability", "otlp_insecure"): "OTEL_EXPORTER_OTLP_INSECURE",
-    ("observability", "traces_sample_rate"): "OTEL_TRACES_SAMPLER_ARG",
-    ("observability", "metrics_enabled"): "OBSERVABILITY_METRICS_ENABLED",
     ("observability", "correlation_header"): "OBSERVABILITY_CORRELATION_HEADER",
     ("http", "timeout_seconds"): "HTTP_TIMEOUT_SECONDS",
     ("http", "retry_attempts"): "HTTP_RETRY_ATTEMPTS",
@@ -141,3 +135,40 @@ def validate_production_settings(*, environment: str, debug: bool) -> None:
                 "provision the realm via IaC or manual setup",
                 context={"environment": environment},
             )
+
+        required = [
+            "DB_PASSWORD",
+            "KEYCLOAK_WEB_CLIENT_SECRET",
+            "KEYCLOAK_ADMIN_CLIENT_SECRET",
+            "AUTH_TOKEN_ENCRYPTION_KEY",
+        ]
+        if os.getenv("MATRIX_ENABLED", "true").lower() == "true":
+            required += ["MATRIX_SERVICE_ADMIN_PASSWORD", "MATRIX_REGISTRATION_SHARED_SECRET"]
+        if os.getenv("TYPESENSE_ENABLED", "true").lower() == "true":
+            required += ["TYPESENSE_API_KEY"]
+        for key in required:
+            value = os.getenv(key, "")
+            if (
+                len(value) < 24
+                or value in {"postgres", "admin", "chatapp", "synapse", "change-me"}
+                or value.startswith("dev-")
+            ):
+                raise ConfigurationError(f"{key} must be an explicit production secret")
+        from urllib.parse import urlparse
+
+        for key in (
+            "AUTH_CALLBACK_URL",
+            "AUTH_DEFAULT_POST_SIGNIN_REDIRECT_URL",
+            "AUTH_POST_LOGOUT_REDIRECT_URL",
+            "KEYCLOAK_PUBLIC_BASE_URL",
+        ):
+            parsed = urlparse(os.getenv(key, ""))
+            if (
+                parsed.scheme != "https"
+                or not parsed.hostname
+                or parsed.username
+                or parsed.fragment
+            ):
+                raise ConfigurationError(f"{key} must be an HTTPS URL")
+        if os.getenv("AUTH_COOKIE_SECURE", "true").lower() != "true":
+            raise ConfigurationError("AUTH_COOKIE_SECURE must be true in production")

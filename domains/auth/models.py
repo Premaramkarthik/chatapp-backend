@@ -156,11 +156,16 @@ class AuthSession:
     user_agent_hash: str | None
     last_seen_at: datetime
     created_at: datetime
+    keycloak_session_id: str | None = None
+    authenticated_at: datetime | None = None
+    token_version: int = 0
+    refresh_owner: str | None = None
+    refresh_lease_until: datetime | None = None
 
     @property
     def is_usable(self) -> bool:
         """Return whether this session can authenticate a request."""
-        return self.status == AuthSessionStatus.ACTIVE
+        return self.status in {AuthSessionStatus.ACTIVE, AuthSessionStatus.REFRESHING}
 
 
 @dataclass(frozen=True, slots=True)

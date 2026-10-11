@@ -38,7 +38,9 @@ class PostgresMatrixAttachmentRepository:
         )
         row = row_from_jsonb(result)
         if row is None:
-            raise RuntimeError("fn_matrix_attachment_metadata mode 1 returned no row")
+            from fastapi import HTTPException
+
+            raise HTTPException(403, detail={"code": "matrix_attachment_owner_required"})
         return row
 
     async def list_for_room(self, room_id: str) -> list[dict[str, Any]]:
@@ -53,6 +55,7 @@ class PostgresMatrixAttachmentRepository:
     async def search(
         self,
         *,
+        user_id: str,
         room_id: str | None = None,
         mimetype: str | None = None,
     ) -> list[dict[str, Any]]:
@@ -60,7 +63,7 @@ class PostgresMatrixAttachmentRepository:
         result = await call_json_function(
             "fn_matrix_attachment_metadata",
             3,
-            {"room_id": room_id, "mimetype": mimetype},
+            {"user_id": user_id, "room_id": room_id, "mimetype": mimetype},
         )
         return list_from_jsonb(result)
 

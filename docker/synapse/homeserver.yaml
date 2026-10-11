@@ -15,8 +15,6 @@ listeners:
     resources:
       - names: [client, federation]
         compress: false
-  - port: 9000
-    type: metrics
 
 database:
   name: psycopg2
@@ -81,3 +79,29 @@ search:
 report_stats: false
 
 enable_admin_api: true
+
+# Accounts are explicitly bound by the application through external_ids.
+oidc_providers:
+  - idp_id: keycloak
+    idp_name: PariPath
+    issuer: http://localhost:8080/realms/chatapp
+    discover: false
+    skip_verification: true  # HTTP metadata endpoints are local-development only
+    client_id: paripath-matrix
+    client_secret: dev-matrix-oidc-change-me
+    authorization_endpoint: http://localhost:8080/realms/chatapp/protocol/openid-connect/auth
+    token_endpoint: http://keycloak:8080/realms/chatapp/protocol/openid-connect/token
+    userinfo_endpoint: http://keycloak:8080/realms/chatapp/protocol/openid-connect/userinfo
+    jwks_uri: http://keycloak:8080/realms/chatapp/protocol/openid-connect/certs
+    pkce_method: always
+    scopes: [openid, profile]
+    enable_registration: false
+    allow_existing_users: false
+    user_mapping_provider:
+      config:
+        subject_claim: sub
+        localpart_template: "{{ user.sub }}"
+sso:
+  client_whitelist: ["http://localhost:8000/v1/chat/matrix/callback?"]
+
+log_config: /data/log.config

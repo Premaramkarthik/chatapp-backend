@@ -3,7 +3,7 @@
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 
 from core.logging.logger import get_logger, log_info
 from domains.auth import AuthService
@@ -186,12 +186,15 @@ async def update_display_name(
     return await build_user_response(updated)
 
 
-@router.delete("/me", status_code=status.HTTP_204_NO_CONTENT)
+@router.delete("/me")
 async def delete_my_account(
     request: Request,
+    response: Response,
     _: ProfileUpdater,
     principal: CurrentPrincipal,
     auth_service: AuthServiceDependency,
-) -> None:
-    """Delete the authenticated user's Keycloak account and local profile."""
-    await auth_service.delete_account(principal_sub=principal.sub, request=request)
+) -> dict:
+    """Disable local access and durably delete remote identity before local cleanup."""
+    result = await auth_service.delete_account(principal_sub=principal.sub, request=request)
+    response.status_code = 200 if result["remote_termination"] == "complete" else 202
+    return result

@@ -74,7 +74,32 @@ class KeycloakVerifier:
             preferred_username=claims.get("preferred_username"),
             identity_provider=claims.get("identity_provider") or claims.get("idp"),
             roles=roles,
+            sid=claims.get("sid") or claims.get("session_state"),
+            auth_time=claims.get("auth_time"),
         )
+
+    async def verify_id_token(self, token: str | None) -> dict:
+        if not token:
+            raise AuthenticationError("Missing ID token")
+        try:
+            key = await self._resolve_signing_key(token)
+            claims = jwt.decode(
+                token,
+                key.key,
+                algorithms=settings.keycloak.algorithms,
+                audience=settings.keycloak.web_client_id,
+                issuer=settings.keycloak.issuer,
+                options={"require": ["exp", "iat", "sub", "nonce"]},
+                leeway=settings.jwt.clock_leeway_sec,
+            )
+            if (
+                claims.get("azp", settings.keycloak.web_client_id)
+                != settings.keycloak.web_client_id
+            ):
+                raise AuthenticationError("Invalid ID token client")
+            return claims
+        except InvalidTokenError as exc:
+            raise AuthenticationError("Invalid ID token") from exc
 
     async def _resolve_signing_key(self, token: str) -> Any:
         """Resolve signing key from Redis JWKS, stale cache, or live JWKS."""

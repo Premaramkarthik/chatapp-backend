@@ -9,12 +9,6 @@ from contextlib import asynccontextmanager
 from typing import Any, TypeVar
 
 from core.logging.logger import get_logger, log_debug, log_warning
-from core.observability.prometheus_metrics import (
-    KEYCLOAK_FAILURES_TOTAL,
-    KEYCLOAK_REQUEST_DURATION_SECONDS,
-    KEYCLOAK_REQUESTS_TOTAL,
-    SERVICE_EXECUTION_DURATION_SECONDS,
-)
 
 logger = get_logger(__name__)
 
@@ -22,54 +16,43 @@ F = TypeVar("F", bound=Callable[..., Any])
 
 
 def observe_service(service_name: str) -> Callable[[F], F]:
-    """Decorator: span, histogram, and structured entry/exit logs for service methods."""
+    """Decorator: structured entry/exit logs for service methods."""
 
     def decorator(func: F) -> F:
         method_name = func.__name__
 
         @functools.wraps(func)
         async def async_wrapper(*args: Any, **kwargs: Any) -> Any:
-            from opentelemetry import trace
 
-            tracer = trace.get_tracer(__name__)
             start = time.perf_counter()
-            with tracer.start_as_current_span(f"{service_name}.{method_name}"):
-                log_debug(
-                    logger,
-                    "Service method execution started",
-                    service=service_name,
-                    method=method_name,
-                )
-                try:
-                    result = await func(*args, **kwargs)
-                except Exception as exc:
-                    duration = time.perf_counter() - start
-                    SERVICE_EXECUTION_DURATION_SECONDS.labels(
-                        service=service_name,
-                        method=method_name,
-                    ).observe(duration)
-                    log_warning(
-                        logger,
-                        "Service method execution failed",
-                        service=service_name,
-                        method=method_name,
-                        duration_ms=f"{duration * 1000:.3f}",
-                        error_type=type(exc).__name__,
-                    )
-                    raise
+            log_debug(
+                logger,
+                "Service method execution started",
+                service=service_name,
+                method=method_name,
+            )
+            try:
+                result = await func(*args, **kwargs)
+            except Exception as exc:
                 duration = time.perf_counter() - start
-                SERVICE_EXECUTION_DURATION_SECONDS.labels(
-                    service=service_name,
-                    method=method_name,
-                ).observe(duration)
-                log_debug(
+                log_warning(
                     logger,
-                    "Service method execution completed",
+                    "Service method execution failed",
                     service=service_name,
                     method=method_name,
                     duration_ms=f"{duration * 1000:.3f}",
+                    error_type=type(exc).__name__,
                 )
-                return result
+                raise
+            duration = time.perf_counter() - start
+            log_debug(
+                logger,
+                "Service method execution completed",
+                service=service_name,
+                method=method_name,
+                duration_ms=f"{duration * 1000:.3f}",
+            )
+            return result
 
         return async_wrapper  # type: ignore[return-value]
 
@@ -78,19 +61,16 @@ def observe_service(service_name: str) -> Callable[[F], F]:
 
 @asynccontextmanager
 async def log_external_call(operation: str) -> AsyncIterator[None]:
-    """Context manager for external HTTP calls with metrics and logging."""
+    """Context manager for external HTTP calls with logging."""
     start = time.perf_counter()
     status = "success"
     try:
         yield
     except Exception:
         status = "error"
-        KEYCLOAK_FAILURES_TOTAL.labels(operation=operation).inc()
         raise
     finally:
         duration = time.perf_counter() - start
-        KEYCLOAK_REQUEST_DURATION_SECONDS.labels(operation=operation).observe(duration)
-        KEYCLOAK_REQUESTS_TOTAL.labels(operation=operation, status=status).inc()
         log_debug(
             logger,
             "External call completed",

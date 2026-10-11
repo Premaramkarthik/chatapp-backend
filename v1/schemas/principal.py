@@ -15,3 +15,5 @@ class KeycloakPrincipal(BaseModel):
     preferred_username: str | None = None
     identity_provider: str | None = None
     roles: list[str] = []
+    sid: str | None = None
+    auth_time: int | None = None

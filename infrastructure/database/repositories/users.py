@@ -4,11 +4,53 @@ from __future__ import annotations
 
 from domains.users.repository import UserRepository
 from domains.users.user import BootstrapUserCommand, User
-from infrastructure.database.connection import call_json_function
+from infrastructure.database.connection import call_json_function, get_pool
+from v1.utils.base import AuthenticationError
 
 
 class PostgresUserRepository(UserRepository):
     """PostgreSQL adapter for users domain persistence."""
+
+    async def resolve_verified_identity(
+        self, *, subject: str, email: str, display_name: str | None, created_via: str
+    ) -> User:
+        pool = await get_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            # Serializes first-login claims of the same normalized address.
+            await conn.execute("SELECT pg_advisory_xact_lock(hashtextextended($1, 0))", email)
+            row = await conn.fetchrow(
+                "SELECT * FROM users WHERE keycloak_sub=$1 FOR UPDATE", subject
+            )
+            if row is None:
+                row = await conn.fetchrow(
+                    "SELECT * FROM users WHERE lower(email)=$1 FOR UPDATE", email
+                )
+                if row is not None and row["keycloak_sub"] not in {None, subject}:
+                    raise AuthenticationError(
+                        "Account linking confirmation required", code="account_linking_required"
+                    )
+                if row is None:
+                    row = await conn.fetchrow(
+                        """INSERT INTO users(
+                            keycloak_sub,email,display_name,status,email_verified,created_via)
+                        VALUES($1,$2,$3,'pending_profile_setup',true,$4) RETURNING *""",
+                        subject,
+                        email,
+                        display_name,
+                        created_via,
+                    )
+                else:
+                    row = await conn.fetchrow(
+                        """UPDATE users SET keycloak_sub=$2,email_verified=true,
+                        status=CASE WHEN status='pending_verification'
+                            THEN 'pending_profile_setup' ELSE status END
+                        WHERE id=$1 AND (keycloak_sub IS NULL OR keycloak_sub=$2) RETURNING *""",
+                        row["id"],
+                        subject,
+                    )
+            if row is None or row["status"] not in {"active", "pending_profile_setup"}:
+                raise AuthenticationError("Account is disabled")
+            return User.from_mapping(dict(row))
 
     async def bootstrap(self, command: BootstrapUserCommand) -> User:
         """Create or return the local user row for an authenticated principal."""

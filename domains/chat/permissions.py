@@ -23,7 +23,7 @@ def mapping_allows_chat(
     if blocked:
         return False
     status = mapping_status or "provisioning"
-    if status != "active":
+    if status not in {"invited", "joined", "active"}:
         return False
     return is_provisioned_room_id(room_id)
 

@@ -40,8 +40,16 @@ class ErrorHandlingMiddleware:
                 receive,
                 send,
                 status_code=exc.status_code,
-                code="http_error",
-                message=str(exc.detail),
+                code=(
+                    exc.detail.get("code", "http_error")
+                    if isinstance(exc.detail, dict)
+                    else "http_error"
+                ),
+                message=(
+                    exc.detail.get("message", "Request failed")
+                    if isinstance(exc.detail, dict)
+                    else str(exc.detail)
+                ),
                 request_id=request_id,
                 headers=exc.headers,
             )

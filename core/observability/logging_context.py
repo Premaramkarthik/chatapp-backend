@@ -60,23 +60,6 @@ def clear_request_context() -> None:
         var.set(None)
 
 
-def _trace_context() -> dict[str, str | None]:
-    """Read OpenTelemetry trace context when available."""
-    try:
-        from opentelemetry import trace
-
-        span = trace.get_current_span()
-        ctx = span.get_span_context()
-        if ctx is None or not ctx.is_valid:
-            return {"trace_id": None, "span_id": None}
-        return {
-            "trace_id": format(ctx.trace_id, "032x"),
-            "span_id": format(ctx.span_id, "016x"),
-        }
-    except Exception:
-        return {"trace_id": None, "span_id": None}
-
-
 def observability_log_patcher(record: dict[str, Any]) -> None:
     """Inject observability fields into every log record."""
     from core.config.settings import settings
@@ -84,13 +67,10 @@ def observability_log_patcher(record: dict[str, Any]) -> None:
     extra = record["extra"]
     if not extra.get("logger_name"):
         extra["logger_name"] = record["name"]
-    trace_ctx = _trace_context()
     extra.setdefault("service_name", settings.observability.service_name)
     extra.setdefault("environment", settings.app.environment)
     extra.setdefault("request_id", request_id_var.get())
     extra.setdefault("correlation_id", correlation_id_var.get())
-    extra.setdefault("trace_id", trace_ctx["trace_id"])
-    extra.setdefault("span_id", trace_ctx["span_id"])
     extra.setdefault("user_id", user_id_var.get())
     extra.setdefault("keycloak_sub", keycloak_sub_var.get())
     extra.setdefault("endpoint", endpoint_var.get())

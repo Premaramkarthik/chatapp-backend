@@ -2,16 +2,9 @@
 
 from __future__ import annotations
 
-import time
 from typing import Any
 
 from core.config.settings import settings
-from core.observability.prometheus_metrics import (
-    SEARCH_CACHE_HITS_TOTAL,
-    SEARCH_CACHE_MISSES_TOTAL,
-    SEARCH_REQUESTS_TOTAL,
-    SEARCH_TYPESENSE_LATENCY_SECONDS,
-)
 from domains.search.filters import (
     TravelerSearchFilters,
     build_role_filter,
@@ -51,29 +44,20 @@ class SearchService:
 
         cached = await self._cache.get_json(cache_key)
         if cached is not None:
-            SEARCH_CACHE_HITS_TOTAL.labels(endpoint=endpoint).inc()
-            SEARCH_REQUESTS_TOTAL.labels(endpoint=endpoint, outcome="cache_hit").inc()
             return cached
 
-        SEARCH_CACHE_MISSES_TOTAL.labels(endpoint=endpoint).inc()
-        started = time.perf_counter()
+        pass
         try:
             client = get_typesense_async_client()
             raw = await client.collections[collection].documents.search(params)
         except Exception as exc:
-            SEARCH_REQUESTS_TOTAL.labels(endpoint=endpoint, outcome="error").inc()
             raise TypesenseIntegrationError(str(exc)) from exc
-        finally:
-            SEARCH_TYPESENSE_LATENCY_SECONDS.labels(endpoint=endpoint).observe(
-                time.perf_counter() - started
-            )
 
         result = {
             "hits": raw.get("hits") or [],
             "found": int(raw.get("found") or 0),
         }
         await self._cache.set_json(cache_key, result, endpoint=endpoint)
-        SEARCH_REQUESTS_TOTAL.labels(endpoint=endpoint, outcome="success").inc()
         return result
 
     async def search_users(
@@ -236,11 +220,8 @@ class SearchService:
         )
         cached = await self._cache.get_json(cache_key)
         if cached is not None:
-            SEARCH_CACHE_HITS_TOTAL.labels(endpoint="global").inc()
-            SEARCH_REQUESTS_TOTAL.labels(endpoint="global", outcome="cache_hit").inc()
             return cached
 
-        SEARCH_CACHE_MISSES_TOTAL.labels(endpoint="global").inc()
         searches = [
             {
                 "collection": settings.typesense.users_collection,
@@ -277,17 +258,12 @@ class SearchService:
                 "per_page": limit,
             },
         ]
-        started = time.perf_counter()
+        pass
         try:
             client = get_typesense_async_client()
             raw = await client.multi_search.perform({"searches": searches}, {})
         except Exception as exc:
-            SEARCH_REQUESTS_TOTAL.labels(endpoint="global", outcome="error").inc()
             raise TypesenseIntegrationError(str(exc)) from exc
-        finally:
-            SEARCH_TYPESENSE_LATENCY_SECONDS.labels(endpoint="global").observe(
-                time.perf_counter() - started
-            )
 
         results = raw.get("results") or []
 
@@ -305,7 +281,6 @@ class SearchService:
             "requests": [],
         }
         await self._cache.set_json(cache_key, payload, endpoint="global")
-        SEARCH_REQUESTS_TOTAL.labels(endpoint="global", outcome="success").inc()
         return payload
 
     async def search_popular_searches(self, *, limit: int = 10) -> dict[str, Any]:

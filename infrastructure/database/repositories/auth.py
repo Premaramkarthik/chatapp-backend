@@ -107,6 +107,8 @@ class PostgresAuthRepository:
         device_label: str | None,
         ip_hash: str | None,
         user_agent_hash: str | None,
+        keycloak_session_id: str,
+        authenticated_at: datetime,
     ) -> AuthSession:
         row = await fetchrow(
             """
@@ -125,10 +127,11 @@ class PostgresAuthRepository:
                 csrf_token_hash,
                 device_label,
                 ip_hash,
-                user_agent_hash
+                user_agent_hash, keycloak_session_id, authenticated_at
             )
             VALUES (
-                $1, $2::uuid, $3, 'ACTIVE', $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14
+                $1, $2::uuid, $3, 'ACTIVE', $4, $5, $6, $7, $8, $9,
+                $10, $11, $12, $13, $14, $15, $16
             )
             RETURNING *
             """,
@@ -146,6 +149,8 @@ class PostgresAuthRepository:
             device_label,
             ip_hash,
             user_agent_hash,
+            keycloak_session_id,
+            authenticated_at,
         )
         return _session_from_record(row)
 
@@ -171,7 +176,7 @@ class PostgresAuthRepository:
             """
             UPDATE auth_sessions
             SET status = $2, updated_at = now()
-            WHERE id = $1::uuid
+            WHERE id = $1::uuid AND status NOT IN ('REVOKED', 'COMPROMISED', 'EXPIRED')
             RETURNING *
             """,
             session_id,
@@ -200,6 +205,8 @@ class PostgresAuthRepository:
         access_expires_at: datetime,
         refresh_expires_at: datetime | None,
         idle_expires_at: datetime,
+        expected_version: int,
+        refresh_owner: str,
     ) -> AuthSession | None:
         row = await fetchrow(
             """
@@ -212,8 +219,11 @@ class PostgresAuthRepository:
                 refresh_expires_at = COALESCE($6, refresh_expires_at),
                 idle_expires_at = $7,
                 last_seen_at = now(),
-                updated_at = now()
-            WHERE id = $1::uuid
+                updated_at = now(), token_version = token_version + 1,
+                refresh_owner = NULL, refresh_lease_until = NULL
+            WHERE id = $1::uuid AND status = 'REFRESHING'
+              AND token_version = $8 AND refresh_owner = $9::uuid
+              AND refresh_lease_until > now()
             RETURNING *
             """,
             session_id,
@@ -223,6 +233,8 @@ class PostgresAuthRepository:
             access_expires_at,
             refresh_expires_at,
             idle_expires_at,
+            expected_version,
+            refresh_owner,
         )
         return None if row is None else _session_from_record(row)
 
@@ -400,14 +412,12 @@ class PostgresAuthRepository:
 
     async def expire_old_sessions(self) -> None:
         """Mark old sessions expired. Intended for maintenance jobs."""
-        await execute(
-            """
+        await execute("""
             UPDATE auth_sessions
             SET status = 'EXPIRED', updated_at = now()
             WHERE status IN ('ACTIVE', 'REFRESHING')
               AND (idle_expires_at <= now() OR max_expires_at <= now())
-            """
-        )
+            """)
 
     async def create_signup_session(
         self,
@@ -572,6 +582,103 @@ class PostgresAuthRepository:
         )
         return None if row is None else _password_reset_token_from_record(row)
 
+    async def claim_refresh(self, session: AuthSession, owner: str) -> bool:
+        row = await fetchrow(
+            """UPDATE auth_sessions SET status='REFRESHING', refresh_owner=$2::uuid,
+            refresh_lease_until=now()+interval '15 seconds'
+            WHERE id=$1::uuid AND status='ACTIVE' AND token_version=$3
+            RETURNING id""",
+            session.id,
+            owner,
+            session.token_version,
+        )
+        return row is not None
+
+    async def revoke_with_operation(
+        self,
+        *,
+        user_id: str,
+        subject: str,
+        session_id: str | None = None,
+        keep_session_id: str | None = None,
+        delete_account: bool = False,
+    ) -> tuple[str, list[AuthSession]]:
+        pool = await get_pool()
+        async with pool.acquire() as conn, conn.transaction():
+            await conn.execute("SELECT id FROM users WHERE id=$1::uuid FOR UPDATE", user_id)
+            cutoff = await conn.fetchval("SELECT clock_timestamp()")
+            rows = await conn.fetch(
+                """UPDATE auth_sessions SET status='REVOKED', updated_at=now(),
+                refresh_owner=NULL, refresh_lease_until=NULL
+                WHERE user_id=$1::uuid AND status IN ('ACTIVE','REFRESHING','LOCKED')
+                AND ($2::uuid IS NULL OR id=$2::uuid)
+                AND ($3::uuid IS NULL OR id<>$3::uuid) AND created_at <= $4
+                RETURNING *""",
+                user_id,
+                session_id,
+                keep_session_id,
+                cutoff,
+            )
+            if session_id and not rows:
+                # Idempotent retry can still recover the original session target.
+                row = await conn.fetchrow(
+                    "SELECT * FROM auth_sessions WHERE id=$1::uuid AND user_id=$2::uuid",
+                    session_id,
+                    user_id,
+                )
+                if row is None:
+                    raise ValueError("Session not found")
+                rows = [row]
+            matrix_targets = await conn.fetch(
+                """SELECT DISTINCT mxid,device_id FROM (
+                SELECT mxid,device_id,bff_session_id,created_at FROM matrix_sessions
+                WHERE user_id=$1::uuid
+                UNION ALL SELECT mxid,device_id,bff_session_id,created_at FROM matrix_login_attempts
+                WHERE user_id=$1::uuid
+                ) d WHERE ($2::uuid IS NULL OR bff_session_id=$2::uuid)
+                AND ($3::uuid IS NULL OR bff_session_id<>$3::uuid) AND created_at<=$4""",
+                user_id,
+                session_id,
+                keep_session_id,
+                cutoff,
+            )
+            await conn.execute(
+                """UPDATE matrix_sessions SET status='revoked' WHERE user_id=$1::uuid
+                AND ($2::uuid IS NULL OR bff_session_id=$2::uuid)
+                AND ($3::uuid IS NULL OR bff_session_id<>$3::uuid) AND created_at<=$4""",
+                user_id,
+                session_id,
+                keep_session_id,
+                cutoff,
+            )
+            preserve = None
+            if keep_session_id:
+                preserve = await conn.fetchval(
+                    "SELECT keycloak_session_id FROM auth_sessions WHERE id=$1::uuid",
+                    keep_session_id,
+                )
+            payload = {
+                "scope": "delete_account" if delete_account else "current" if session_id else "all",
+                "subject": subject,
+                "user_id": user_id,
+                "cutoff_ms": int(cutoff.timestamp() * 1000),
+                "session_ids": sorted({r["keycloak_session_id"] for r in rows}),
+                "preserve_session_id": preserve,
+                "matrix_devices": [dict(target) for target in matrix_targets],
+            }
+            if delete_account:
+                payload["matrix_account"] = await conn.fetchval(
+                    "SELECT mxid FROM matrix_user_mappings WHERE user_id=$1::uuid", user_id
+                )
+                await conn.execute(
+                    "UPDATE users SET status='deleted', updated_at=now() WHERE id=$1::uuid", user_id
+                )
+            op = await conn.fetchval(
+                "INSERT INTO auth_remote_operations(payload) VALUES($1::jsonb) RETURNING id",
+                payload,
+            )
+        return str(op), [_session_from_record(row) for row in rows]
+
 
 def _signup_session_from_mapping(data: dict) -> SignupSession:
     return SignupSession(
@@ -653,6 +760,11 @@ def _session_from_record(row: Record | None) -> AuthSession:
         user_agent_hash=row["user_agent_hash"],
         last_seen_at=row["last_seen_at"] or now_utc(),
         created_at=row["created_at"],
+        keycloak_session_id=row["keycloak_session_id"],
+        authenticated_at=row["authenticated_at"],
+        token_version=row["token_version"],
+        refresh_owner=str(row["refresh_owner"]) if row["refresh_owner"] else None,
+        refresh_lease_until=row["refresh_lease_until"],
     )
 
 

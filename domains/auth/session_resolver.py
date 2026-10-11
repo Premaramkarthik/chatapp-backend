@@ -1,69 +1,43 @@
-"""Resolve BFF session cookies into request principals."""
+"""Fail-closed session resolution with PostgreSQL single-flight refresh."""
 
 from __future__ import annotations
 
+import asyncio
+import time
 from datetime import UTC, datetime, timedelta
+from uuid import uuid4
+
+from fastapi import HTTPException
 
 from core.config.settings import settings
-from core.observability.prometheus_metrics import AUTH_REFRESH_FAILURE_TOTAL
-from domains.auth.capabilities import missing_default_capabilities, refresh_token_set_if_needed
 from domains.auth.keycloak_client import keycloak_auth_client
 from domains.auth.models import AuthSession, AuthSessionStatus
 from domains.auth.security import TokenCipher, hash_secret
-from domains.auth.session_cache import (
-    acquire_refresh_lock,
-    cache_session_snapshot,
-    is_session_revoked,
-    release_refresh_lock,
-)
 from infrastructure.database.repositories.auth import PostgresAuthRepository
+from infrastructure.database.repositories.users import PostgresUserRepository
 from infrastructure.keycloak.adapter import keycloak_verifier
-from v1.schemas.principal import KeycloakPrincipal
+from infrastructure.keycloak.session_control import session_control
 from v1.utils.base import AuthenticationError
 
 
 class AuthSessionResolver:
-    """Resolve and refresh server-side sessions."""
-
-    def __init__(
-        self,
-        *,
-        repository: PostgresAuthRepository | None = None,
-        cipher: TokenCipher | None = None,
-    ) -> None:
+    def __init__(self, *, repository=None, cipher=None):
         self._repository = repository or PostgresAuthRepository()
         self._cipher = cipher or TokenCipher()
 
-    async def resolve(self, session_token: str) -> tuple[KeycloakPrincipal, AuthSession]:
-        """Resolve an opaque session cookie into a Keycloak principal and auth session."""
-        session_hash = hash_secret(session_token)
-        if await is_session_revoked(session_hash):
-            raise AuthenticationError("Authentication session has been revoked")
-
-        session = await self._repository.get_session_by_hash(session_hash)
-        if session is None:
-            raise AuthenticationError("Authentication session not found")
-        if not session.is_usable:
-            raise AuthenticationError("Authentication session is not active")
-        now = datetime.now(UTC)
-        if session.idle_expires_at <= now or session.max_expires_at <= now:
-            await self._repository.mark_session_status(
-                session_id=session.id,
-                status=AuthSessionStatus.EXPIRED,
-            )
-            raise AuthenticationError("Authentication session expired")
-
+    async def resolve(self, session_token: str):
+        session = await self.resolve_for_revocation(session_token)
         session = await self._refresh_if_needed(session)
-        access_token = self._cipher.decrypt(session.access_token_encrypted)
-        if access_token is None:
-            raise AuthenticationError("Authentication session is missing an access token")
-        principal = await keycloak_verifier.verify_token(access_token)
-        if missing_default_capabilities(principal.roles):
-            await self._backfill_missing_capabilities(session, principal)
-            access_token = self._cipher.decrypt(session.access_token_encrypted)
-            if access_token is None:
-                raise AuthenticationError("Authentication session is missing an access token")
-            principal = await keycloak_verifier.verify_token(access_token)
+        token = self._cipher.decrypt(session.access_token_encrypted)
+        if not token:
+            raise AuthenticationError("Missing session token")
+        principal = await keycloak_verifier.verify_token(token)
+        if principal.sid != session.keycloak_session_id:
+            raise AuthenticationError("Session identity changed")
+        await session_control.check(principal)
+        latest = await self._repository.get_session_by_hash(session.session_hash)
+        if latest is None or not latest.is_usable:
+            raise AuthenticationError("Authentication session was revoked")
         await self._repository.touch_session(
             session_id=session.id,
             idle_expires_at=min(
@@ -71,95 +45,91 @@ class AuthSessionResolver:
                 session.max_expires_at,
             ),
         )
-        await cache_session_snapshot(session, roles=principal.roles)
-        return principal, session
+        return principal, latest
+
+    async def resolve_for_revocation(self, session_token: str) -> AuthSession:
+        """Authenticate ownership locally so provider outages cannot prevent logout."""
+        session = await self._repository.get_session_by_hash(hash_secret(session_token))
+        if session is None or not session.is_usable:
+            raise AuthenticationError("Authentication session is not active")
+        now = datetime.now(UTC)
+        if min(session.idle_expires_at, session.max_expires_at) <= now:
+            await self._repository.mark_session_status(
+                session_id=session.id, status=AuthSessionStatus.EXPIRED
+            )
+            raise AuthenticationError("Authentication session expired")
+        user = await PostgresUserRepository().get_by_id(session.user_id)
+        if user is None or user.status not in {"active", "pending_profile_setup"}:
+            raise AuthenticationError("Account is disabled")
+        return session
 
     async def _refresh_if_needed(self, session: AuthSession) -> AuthSession:
-        refresh_at = datetime.now(UTC) + timedelta(seconds=settings.auth.refresh_leeway_sec)
-        if session.access_expires_at > refresh_at:
+        if session.status == AuthSessionStatus.ACTIVE and session.access_expires_at > datetime.now(
+            UTC
+        ) + timedelta(seconds=settings.auth.refresh_leeway_sec):
             return session
-
-        refresh_token = self._cipher.decrypt(session.refresh_token_encrypted)
-        if refresh_token is None:
-            return session
-        if not await acquire_refresh_lock(session.id):
-            return session
-
-        try:
-            await self._repository.mark_session_status(
-                session_id=session.id,
-                status=AuthSessionStatus.REFRESHING,
+        owner = str(uuid4())
+        if not await self._repository.claim_refresh(session, owner):
+            deadline = time.monotonic() + 2
+            while time.monotonic() < deadline:
+                await asyncio.sleep(0.05)
+                latest = await self._repository.get_session_by_hash(session.session_hash)
+                if latest is None or not latest.is_usable:
+                    raise AuthenticationError("Session revoked during refresh")
+                if (
+                    latest.status == AuthSessionStatus.ACTIVE
+                    and latest.token_version > session.token_version
+                ):
+                    return latest
+                if latest.refresh_lease_until and latest.refresh_lease_until <= datetime.now(UTC):
+                    await self._repository.mark_session_status(
+                        session_id=latest.id, status=AuthSessionStatus.LOCKED
+                    )
+                    raise AuthenticationError(
+                        "Refresh outcome unknown; sign in again", code="reauthentication_required"
+                    )
+            raise HTTPException(
+                503, detail={"code": "session_refresh_pending"}, headers={"Retry-After": "2"}
             )
-            token_set = await keycloak_auth_client.refresh(refresh_token=refresh_token)
-            updated = await self._repository.update_session_tokens(
+        refresh_token = self._cipher.decrypt(session.refresh_token_encrypted)
+        try:
+            if not refresh_token:
+                raise AuthenticationError("Missing refresh token")
+            tokens = await keycloak_auth_client.refresh(refresh_token=refresh_token)
+            principal = await keycloak_verifier.verify_token(tokens.access_token)
+            if principal.sid != session.keycloak_session_id:
+                raise AuthenticationError("Session credentials changed")
+            await session_control.check(principal)
+            latest = await self._repository.update_session_tokens(
                 session_id=session.id,
-                access_token_encrypted=str(self._cipher.encrypt(token_set.access_token)),
-                refresh_token_encrypted=self._cipher.encrypt(token_set.refresh_token),
-                id_token_encrypted=self._cipher.encrypt(token_set.id_token),
-                access_expires_at=token_set.expires_at,
-                refresh_expires_at=token_set.refresh_expires_at,
+                access_token_encrypted=self._cipher.encrypt(tokens.access_token),
+                refresh_token_encrypted=self._cipher.encrypt(tokens.refresh_token),
+                id_token_encrypted=self._cipher.encrypt(tokens.id_token),
+                access_expires_at=tokens.expires_at,
+                refresh_expires_at=tokens.refresh_expires_at,
                 idle_expires_at=min(
                     datetime.now(UTC) + timedelta(seconds=settings.auth.session_idle_sec),
                     session.max_expires_at,
                 ),
+                expected_version=session.token_version,
+                refresh_owner=owner,
             )
-            return updated or session
-        except Exception:
-            AUTH_REFRESH_FAILURE_TOTAL.labels(reason="refresh_exception").inc()
+            if latest is None:
+                raise AuthenticationError("Session revoked during refresh")
+            return latest
+        except AuthenticationError:
             await self._repository.mark_session_status(
-                session_id=session.id,
-                status=AuthSessionStatus.COMPROMISED,
+                session_id=session.id, status=AuthSessionStatus.REVOKED
             )
             raise
-        finally:
-            await release_refresh_lock(session.id)
-
-    async def _backfill_missing_capabilities(
-        self,
-        session: AuthSession,
-        principal: KeycloakPrincipal,
-    ) -> None:
-        """Assign missing default roles and refresh the session access token."""
-        refresh_token = self._cipher.decrypt(session.refresh_token_encrypted)
-        if refresh_token is None:
-            await keycloak_auth_client.assign_default_client_roles(user_id=principal.sub)
-            return
-
-        from domains.auth.models import TokenSet
-
-        token_set = TokenSet(
-            access_token=self._cipher.decrypt(session.access_token_encrypted) or "",
-            refresh_token=refresh_token,
-            id_token=self._cipher.decrypt(session.id_token_encrypted),
-            expires_at=session.access_expires_at,
-            refresh_expires_at=session.refresh_expires_at,
-        )
-        refreshed, _updated_principal = await refresh_token_set_if_needed(
-            keycloak_sub=principal.sub,
-            roles=principal.roles,
-            token_set=token_set,
-        )
-        if refreshed.access_token == token_set.access_token:
-            return
-
-        updated = await self._repository.update_session_tokens(
-            session_id=session.id,
-            access_token_encrypted=str(self._cipher.encrypt(refreshed.access_token)),
-            refresh_token_encrypted=self._cipher.encrypt(refreshed.refresh_token),
-            id_token_encrypted=self._cipher.encrypt(refreshed.id_token),
-            access_expires_at=refreshed.expires_at,
-            refresh_expires_at=refreshed.refresh_expires_at,
-            idle_expires_at=min(
-                datetime.now(UTC) + timedelta(seconds=settings.auth.session_idle_sec),
-                session.max_expires_at,
-            ),
-        )
-        if updated is not None:
-            session.access_token_encrypted = updated.access_token_encrypted
-            session.refresh_token_encrypted = updated.refresh_token_encrypted
-            session.id_token_encrypted = updated.id_token_encrypted
-            session.access_expires_at = updated.access_expires_at
-            session.refresh_expires_at = updated.refresh_expires_at
+        except Exception as exc:
+            # A request may have reached the provider: never blindly reuse a rotating token.
+            await self._repository.mark_session_status(
+                session_id=session.id, status=AuthSessionStatus.LOCKED
+            )
+            raise AuthenticationError(
+                "Refresh outcome unknown; sign in again", code="reauthentication_required"
+            ) from exc
 
 
 auth_session_resolver = AuthSessionResolver()

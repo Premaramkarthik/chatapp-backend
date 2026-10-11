@@ -2,13 +2,10 @@
 
 from __future__ import annotations
 
-import secrets
 from typing import Any
 
 from core.config.settings import settings
 from core.logging.logger import get_logger, log_info, log_warning
-from core.observability.prometheus_metrics import MATRIX_PROVISION_TOTAL
-from domains.auth.security import TokenCipher
 from infrastructure.database.repositories.matrix_users import PostgresMatrixUserRepository
 from infrastructure.matrix.admin import synapse_admin_client
 from v1.utils.base import MatrixIntegrationError
@@ -37,10 +34,8 @@ class MatrixProvisioningService:
         self,
         *,
         users: PostgresMatrixUserRepository | None = None,
-        cipher: TokenCipher | None = None,
     ) -> None:
         self._users = users or PostgresMatrixUserRepository()
-        self._cipher = cipher or TokenCipher()
 
     async def ensure_user_provisioned(
         self,
@@ -54,12 +49,17 @@ class MatrixProvisioningService:
             raise MatrixProvisionError("Matrix is disabled")
 
         existing = await self._users.get_by_user_id(user_id)
-        if existing and existing.get("provision_status") == "active":
-            return existing
 
-        localpart = matrix_localpart_for_user(user_id)
-        mxid = matrix_mxid_for_localpart(localpart)
-        password = secrets.token_urlsafe(32)
+        from infrastructure.database.repositories.users import PostgresUserRepository
+
+        user = await PostgresUserRepository().get_by_id(user_id)
+        subject = user.keycloak_sub if user else None
+        if not subject:
+            raise MatrixProvisionError("Verified application identity required")
+        localpart = existing["localpart"] if existing else matrix_localpart_for_user(user_id)
+        mxid = existing["mxid"] if existing else matrix_mxid_for_localpart(localpart)
+        if not mxid.endswith(f":{settings.matrix.server_name}"):
+            raise MatrixProvisionError("Provider migration requires an explicit migration")
 
         log_info(
             logger,
@@ -72,18 +72,17 @@ class MatrixProvisioningService:
         try:
             await synapse_admin_client.create_or_update_user(
                 mxid=mxid,
-                password=password,
+                subject=subject,
                 displayname=display_name,
             )
         except MatrixIntegrationError as exc:
-            MATRIX_PROVISION_TOTAL.labels(outcome="failed").inc()
             log_warning(
                 logger,
                 "Matrix user provision failed",
                 matrix_category="provisioning",
                 request_id=request_id,
                 user_id=user_id,
-                reason=str(exc),
+                reason=type(exc).__name__,
             )
             raise MatrixProvisionError(str(exc)) from exc
 
@@ -91,10 +90,9 @@ class MatrixProvisioningService:
             user_id=user_id,
             mxid=mxid,
             localpart=localpart,
-            password_encrypted=self._cipher.encrypt(password) or "",
+            password_encrypted="",
             provision_status="active",
         )
-        MATRIX_PROVISION_TOTAL.labels(outcome="success").inc()
         log_info(
             logger,
             "Matrix user provision committed",

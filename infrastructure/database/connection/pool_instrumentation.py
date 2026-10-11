@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING, Any
 
 from core.config.settings import settings
 from core.logging.logger import get_logger, log_debug, log_warning
-from core.observability.prometheus_metrics import DATABASE_POOL_ACQUIRE_WAIT_SECONDS
 
 if TYPE_CHECKING:
     import asyncpg
@@ -57,14 +56,14 @@ def log_pool_close(
 
 async def close_pool_with_instrumentation(pool: asyncpg.Pool, service: str = POOL_SERVICE) -> None:
     """Close an asyncpg pool and emit a structured timing line."""
-    t0 = time.perf_counter()
+    time.perf_counter()
     try:
         await pool.close()
-    except Exception as exc:
-        log_pool_close(service, time.perf_counter() - t0, ok=False, error_type=type(exc).__name__)
+    except Exception:
+        pass
         raise
     else:
-        log_pool_close(service, time.perf_counter() - t0, ok=True)
+        pass
 
 
 class InstrumentedAsyncpgPool:
@@ -107,7 +106,6 @@ class _AcquireWaitLoggingContext:
         t0 = time.perf_counter()
         conn = await self._holder.__aenter__()
         wait_sec = time.perf_counter() - t0
-        DATABASE_POOL_ACQUIRE_WAIT_SECONDS.observe(wait_sec)
         log_pool_acquire_wait(self._service, wait_sec)
         return conn
 

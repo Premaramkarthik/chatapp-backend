@@ -8,3 +8,12 @@ logs
 *.pyc
 dist
 build
+
+.env.*
+!.env.example
+.aws
+.codex
+.agents
+secrets
+*.key
+*.pem

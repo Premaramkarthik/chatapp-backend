@@ -92,5 +92,18 @@ def test_account_linking_rejects_active_duplicate_subject() -> None:
             expected_identity_provider=None,
             incoming_identity_provider=None,
         )
-        == AccountLinkDecision.REJECT_ACTIVE_DUPLICATE
+        == AccountLinkDecision.REQUIRE_LINKING
+    )
+
+
+def test_pending_verification_does_not_allow_subject_reassignment():
+    assert (
+        decide_account_linking(
+            existing_status="pending_verification",
+            existing_keycloak_sub="original",
+            incoming_keycloak_sub="attacker",
+            expected_identity_provider=None,
+            incoming_identity_provider=None,
+        )
+        == AccountLinkDecision.REQUIRE_LINKING
     )

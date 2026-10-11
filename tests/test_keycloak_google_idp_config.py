@@ -66,7 +66,7 @@ def test_build_google_idp_payload_builds_keycloak_shape() -> None:
     assert payload["config"]["clientId"] == "google-client-id"
     assert payload["config"]["hideOnLoginPage"] == "true"
     assert payload["config"]["prompt"] == "select_account"
-    assert payload["firstBrokerLoginFlowAlias"] == "chatapp-google-auto-link"
+    assert payload["firstBrokerLoginFlowAlias"] == "first broker login"
 
 
 def test_collect_web_redirect_uris_includes_localhost_mirror() -> None:
@@ -74,16 +74,14 @@ def test_collect_web_redirect_uris_includes_localhost_mirror() -> None:
     with patch("infrastructure.keycloak.google_idp_config.settings", _mock_settings()):
         uris = _collect_web_redirect_uris()
     assert "http://localhost:8000/v1/auth/signin/callback" in uris
-    assert "http://127.0.0.1:8000/v1/auth/signin/callback" in uris
-    assert "http://localhost:5173/home/auth/callback" in uris
+    assert uris == {"http://localhost:8000/v1/auth/signin/callback"}
 
 
 def test_collect_post_logout_redirect_uris_includes_localhost_variants() -> None:
     """Post-logout redirect patterns include localhost and 127.0.0.1 wildcards."""
     with patch("infrastructure.keycloak.google_idp_config.settings", _mock_settings()):
         uris = _collect_post_logout_redirect_uris()
-    assert "http://localhost:8080/*" in uris
-    assert "http://127.0.0.1:8080/*" in uris
+    assert uris == {"http://localhost:8080/"}
 
 
 @pytest.mark.asyncio
@@ -151,6 +149,8 @@ async def test_ensure_keycloak_google_idp_creates_provider() -> None:
             return flows_response
         if method == "GET" and url.endswith("/clients"):
             return list_response
+        if method == "PUT" and "/clients/uuid-1" in url:
+            return detail_response
         if method == "GET" and "/clients/uuid-1" in url:
             return detail_response
         if method == "GET" and url.endswith("/identity-provider/instances/google"):
@@ -231,6 +231,8 @@ async def test_ensure_keycloak_google_idp_updates_existing_provider() -> None:
             return flows_response
         if method == "GET" and url.endswith("/clients"):
             return list_response
+        if method == "PUT" and "/clients/uuid-1" in url:
+            return detail_response
         if method == "GET" and "/clients/uuid-1" in url:
             return detail_response
         if method == "GET" and url.endswith("/identity-provider/instances/google"):
@@ -239,7 +241,7 @@ async def test_ensure_keycloak_google_idp_updates_existing_provider() -> None:
             assert json is not None
             assert json["config"]["clientId"] == "google-client-id"
             assert json["config"]["prompt"] == "select_account"
-            assert json["firstBrokerLoginFlowAlias"] == "chatapp-google-auto-link"
+            assert json["firstBrokerLoginFlowAlias"] == "first broker login"
             return idp_put_response
         raise AssertionError(f"Unexpected request: {method} {url}")
 

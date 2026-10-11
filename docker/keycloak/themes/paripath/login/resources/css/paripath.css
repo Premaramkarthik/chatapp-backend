@@ -1,0 +1,7 @@
+/* PariPath: teal, warm surfaces and rounded forms. */
+:root { --pf-v5-global--primary-color--100: #087f8c; --pf-v5-global--primary-color--200: #065f69; }
+body { background: #f6f4ef; color: #182f34; }
+#kc-header-wrapper { color: #087f8c; font-family: Georgia, serif; text-transform: none; font-size: 2rem; }
+.card-pf, .pf-v5-c-login__main { border-radius: 24px; border-top-color: #087f8c; }
+input, .pf-v5-c-form-control { border-radius: 8px; }
+.pf-v5-c-button.pf-m-primary { background: #087f8c; border-radius: 10px; }

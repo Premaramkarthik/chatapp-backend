@@ -83,12 +83,16 @@ def validate_post_signin_redirect(uri: str | None) -> str:
     """Return a safe post-signin redirect URI from allowlisted origins."""
     candidate = uri or settings.auth.default_post_signin_redirect_url
     parsed = urlparse(candidate)
-    if not parsed.scheme or not parsed.netloc:
+    if not parsed.scheme or not parsed.netloc or parsed.username or parsed.fragment:
         raise AuthenticationError("Invalid redirect URI")
 
     origin = f"{parsed.scheme}://{parsed.netloc}"
     if origin not in settings.auth.allowed_redirect_origins:
         raise AuthenticationError("Redirect URI origin is not allowed")
+    if candidate != settings.auth.default_post_signin_redirect_url:
+        raise AuthenticationError("Redirect URI path is not allowed")
+    if settings.app.environment.lower() in {"production", "prod"} and parsed.scheme != "https":
+        raise AuthenticationError("HTTPS redirect required")
     return candidate
 
 

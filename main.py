@@ -10,7 +10,7 @@ from core.config.settings import settings
 from core.logging.logger import setup_logger
 from core.observability.setup import init_observability
 from domains.auth.jwks import jwks_refresh_manager
-from domains.auth.verification_reconcile import run_verification_reconcile_loop
+from domains.auth.remote_operations import run_remote_operations
 from infrastructure.database.connection import close_db, init_db
 from infrastructure.keycloak.google_idp_config import (
     ensure_keycloak_google_idp,
@@ -60,10 +60,7 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
         jwks_refresh_manager.start()
         if settings.typesense.enabled:
             await asyncio.to_thread(ensure_all_collections)
-        if settings.auth.verification_reconcile_enabled:
-            reconcile_task = asyncio.create_task(
-                run_verification_reconcile_loop(reconcile_stop),
-            )
+        reconcile_task = asyncio.create_task(run_remote_operations(reconcile_stop))
     try:
         yield
     finally:
@@ -83,6 +80,9 @@ async def lifespan(_: FastAPI) -> AsyncIterator[None]:
 def create_app() -> FastAPI:
     """Create a configured FastAPI app."""
     setup_logger(settings.logging.file, settings.logging.level)
+    from core.logging.auth_redaction import install_callback_redaction
+
+    install_callback_redaction()
     api = FastAPI(
         title=settings.app.name,
         version=settings.app.version,

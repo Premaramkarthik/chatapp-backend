@@ -8,7 +8,6 @@ import dramatiq
 
 from core.config.settings import settings
 from core.logging.logger import get_logger, log_warning
-from core.observability.prometheus_metrics import SEARCH_INDEX_JOBS_TOTAL
 from domains.search.outbox_processor import process_outbox_event
 from infrastructure.database.repositories.discovery import PostgresDiscoveryRepository
 from infrastructure.database.repositories.search_analytics import SearchAnalyticsRepository
@@ -40,27 +39,13 @@ def index_user_document(user_id: str) -> None:
         collection = settings.typesense.users_collection
         if row is None:
             delete_document(collection, user_id)
-            SEARCH_INDEX_JOBS_TOTAL.labels(
-                collection=collection, action="delete", outcome="success"
-            ).inc()
             return
         doc = user_row_to_document(row)
         if not doc.get("is_searchable"):
             delete_document(collection, user_id)
-            SEARCH_INDEX_JOBS_TOTAL.labels(
-                collection=collection, action="delete", outcome="success"
-            ).inc()
             return
         upsert_documents(collection, [doc])
-        SEARCH_INDEX_JOBS_TOTAL.labels(
-            collection=collection, action="upsert", outcome="success"
-        ).inc()
     except Exception as exc:
-        SEARCH_INDEX_JOBS_TOTAL.labels(
-            collection=settings.typesense.users_collection,
-            action="upsert",
-            outcome="error",
-        ).inc()
         log_warning(logger, "index_user_document failed", user_id=user_id, error=str(exc))
         raise
 
@@ -75,9 +60,6 @@ def index_traveler_document(user_id: str) -> None:
         collection = settings.typesense.travelers_collection
         if row is None or not should_index_traveler_snapshot(row):
             delete_document(collection, user_id)
-            SEARCH_INDEX_JOBS_TOTAL.labels(
-                collection=collection, action="delete", outcome="success"
-            ).inc()
             return
         doc = snapshot_to_traveler_document(
             row,
@@ -85,15 +67,7 @@ def index_traveler_document(user_id: str) -> None:
             profile_completed=bool(row.get("profile_completed")),
         )
         upsert_documents(collection, [doc])
-        SEARCH_INDEX_JOBS_TOTAL.labels(
-            collection=collection, action="upsert", outcome="success"
-        ).inc()
     except Exception as exc:
-        SEARCH_INDEX_JOBS_TOTAL.labels(
-            collection=settings.typesense.travelers_collection,
-            action="upsert",
-            outcome="error",
-        ).inc()
         log_warning(logger, "index_traveler_document failed", user_id=user_id, error=str(exc))
         raise
 
@@ -105,13 +79,7 @@ def delete_search_document(collection: str, document_id: str) -> None:
         return
     try:
         delete_document(collection, document_id)
-        SEARCH_INDEX_JOBS_TOTAL.labels(
-            collection=collection, action="delete", outcome="success"
-        ).inc()
     except Exception as exc:
-        SEARCH_INDEX_JOBS_TOTAL.labels(
-            collection=collection, action="delete", outcome="error"
-        ).inc()
         log_warning(
             logger,
             "delete_search_document failed",
@@ -167,17 +135,7 @@ def aggregate_popular_searches(*, limit: int = 50) -> None:
 
     try:
         _run(_aggregate())
-        SEARCH_INDEX_JOBS_TOTAL.labels(
-            collection=settings.typesense.popular_searches_collection,
-            action="upsert",
-            outcome="success",
-        ).inc()
     except Exception as exc:
-        SEARCH_INDEX_JOBS_TOTAL.labels(
-            collection=settings.typesense.popular_searches_collection,
-            action="upsert",
-            outcome="error",
-        ).inc()
         log_warning(logger, "aggregate_popular_searches failed", error=str(exc))
         raise
 

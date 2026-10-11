@@ -42,5 +42,5 @@ Order: Keycloak user delete → local DB delete by `keycloak_sub`. Audit event: 
 ## Observability
 
 - Domain events: `KEYCLOAK_USER_*`, `JWT_VALIDATION_FAILED`, `AUTH_SIGNUP_*`
-- Admin HTTP spans: `keycloak.admin.{operation}`
+- Admin HTTP operations emit structured logs with request correlation IDs.
 - Correlation: `X-Request-ID`, `X-Correlation-ID`

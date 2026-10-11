@@ -15,6 +15,7 @@ from v1.schemas.users import UserResponse
 class SigninStartRequest(BaseModel):
     """Request to begin an OAuth2 authorization-code signin."""
 
+    intent: Literal["signin", "signup"] = "signin"
     post_signin_redirect_uri: str | None = None
     identity_provider: Literal["google", "apple"] | None = None
     account_mode: Literal["explorer", "connector"] | None = None
@@ -195,4 +196,4 @@ class SessionResponse(BaseModel):
 class RevokeAllSessionsRequest(BaseModel):
     """Request to revoke all sessions."""
 
-    keep_current: bool = Field(default=True)
+    keep_current: bool = Field(default=False)

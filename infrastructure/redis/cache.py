@@ -10,7 +10,6 @@ from typing import Any
 
 from core.config.settings import settings
 from core.logging.logger import get_logger, log_info, log_warning
-from core.observability.prometheus_metrics import AUTH_REDIS_FALLBACK_TOTAL
 
 logger = get_logger(__name__)
 
@@ -127,7 +126,6 @@ class AuthRedisCache:
             client = await self.client()
             return await client.get(key)
         except Exception as exc:
-            AUTH_REDIS_FALLBACK_TOTAL.labels(reason=type(exc).__name__).inc()
             log_warning(
                 logger,
                 "Redis get failed; using in-memory fallback",
@@ -149,7 +147,6 @@ class AuthRedisCache:
             client = await self.client()
             return bool(await client.set(key, value, ex=ttl_sec, nx=nx))
         except Exception as exc:
-            AUTH_REDIS_FALLBACK_TOTAL.labels(reason=type(exc).__name__).inc()
             log_warning(
                 logger,
                 "Redis set failed; using in-memory fallback",
@@ -175,7 +172,6 @@ class AuthRedisCache:
             client = await self.client()
             return int(await client.delete(*keys))
         except Exception as exc:
-            AUTH_REDIS_FALLBACK_TOTAL.labels(reason=type(exc).__name__).inc()
             log_warning(
                 logger,
                 "Redis delete failed; using in-memory fallback",
@@ -192,7 +188,6 @@ class AuthRedisCache:
                 await client.expire(key, ttl_sec)
             return value
         except Exception as exc:
-            AUTH_REDIS_FALLBACK_TOTAL.labels(reason=type(exc).__name__).inc()
             log_warning(
                 logger,
                 "Redis increment failed; using in-memory fallback",

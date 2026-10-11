@@ -61,14 +61,9 @@ class JwtSettings(EnvSettings):
 
 
 class ObservabilitySettings(EnvSettings):
-    """OpenTelemetry, Prometheus, and structured logging settings."""
+    """Structured logging settings."""
 
-    enabled: bool = Field(True, alias="OBSERVABILITY_ENABLED")
-    service_name: str = Field("chatapp-backend", alias="OTEL_SERVICE_NAME")
-    otlp_endpoint: str = Field("http://localhost:4317", alias="OTEL_EXPORTER_OTLP_ENDPOINT")
-    otlp_insecure: bool = Field(True, alias="OTEL_EXPORTER_OTLP_INSECURE")
-    traces_sample_rate: float = Field(1.0, alias="OTEL_TRACES_SAMPLER_ARG")
-    metrics_enabled: bool = Field(True, alias="OBSERVABILITY_METRICS_ENABLED")
+    service_name: str = Field("chatapp-backend", alias="LOG_SERVICE_NAME")
     correlation_header: str = Field("X-Correlation-ID", alias="OBSERVABILITY_CORRELATION_HEADER")
 
 
@@ -88,8 +83,8 @@ class MiddlewareSettings(EnvSettings):
     auth_enabled: bool = Field(True, alias="MIDDLEWARE_AUTH_ENABLED")
     auth_protected_prefixes_raw: str = Field("/v1", alias="MIDDLEWARE_AUTH_PROTECTED_PREFIXES")
     auth_public_paths_raw: str = Field(
-        "/health/live,/health/ready,/metrics,/docs,/redoc,/openapi.json,/v1/system/version,"
-        "/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/signin/password,"
+        "/health/live,/health/ready,/docs,/redoc,/openapi.json,/v1/system/version,"
+        "/v1/auth/internal/credential-events,/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/signin/password,"
         "/v1/auth/forgot-password,/v1/auth/reset-password/complete,/v1/auth/signup,"
         "/v1/auth/signup/start,/v1/auth/signup/complete,/v1/auth/signup/resend,"
         "/v1/auth/signup/verify/complete,/v1/auth/signup/social/start,/v1/geo",
@@ -101,13 +96,13 @@ class MiddlewareSettings(EnvSettings):
     rate_limit_requests: int = Field(120, alias="MIDDLEWARE_RATE_LIMIT_REQUESTS")
     rate_limit_window_sec: int = Field(60, alias="MIDDLEWARE_RATE_LIMIT_WINDOW_SEC")
     rate_limit_excluded_paths_raw: str = Field(
-        "/health/live,/health/ready,/metrics",
+        "/health/live,/health/ready",
         alias="MIDDLEWARE_RATE_LIMIT_EXCLUDED_PATHS",
     )
 
     db_session_enabled: bool = Field(True, alias="MIDDLEWARE_DB_SESSION_ENABLED")
     db_session_excluded_paths_raw: str = Field(
-        "/health/live,/health/ready,/metrics,/docs,/redoc,/openapi.json,/v1/system/version",
+        "/health/live,/health/ready,/docs,/redoc,/openapi.json,/v1/system/version",
         alias="MIDDLEWARE_DB_SESSION_EXCLUDED_PATHS",
     )
 
@@ -115,8 +110,8 @@ class MiddlewareSettings(EnvSettings):
     csrf_enabled: bool = Field(True, alias="MIDDLEWARE_CSRF_ENABLED")
     security_headers_enabled: bool = Field(True, alias="MIDDLEWARE_SECURITY_HEADERS_ENABLED")
     csrf_excluded_paths_raw: str = Field(
-        "/health/live,/health/ready,/metrics,/docs,/redoc,/openapi.json,/v1/system/version,"
-        "/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/signin/password,"
+        "/health/live,/health/ready,/docs,/redoc,/openapi.json,/v1/system/version,"
+        "/v1/auth/internal/credential-events,/v1/auth/signin/start,/v1/auth/signin/callback,/v1/auth/signin/password,"
         "/v1/auth/forgot-password,/v1/auth/reset-password/complete,/v1/auth/signup,"
         "/v1/auth/signup/start,/v1/auth/signup/complete,/v1/auth/signup/resend,"
         "/v1/auth/signup/verify/complete,/v1/auth/signup/social/start",
@@ -487,7 +482,15 @@ class MatrixSettings(EnvSettings):
     enabled: bool = Field(True, alias="MATRIX_ENABLED")
     homeserver_url: str = Field("http://localhost:8008", alias="MATRIX_HOMESERVER_URL")
     public_homeserver_url: str = Field("", alias="MATRIX_PUBLIC_HOMESERVER_URL")
-    sliding_sync_url: str = Field("http://localhost:8090", alias="MATRIX_SLIDING_SYNC_URL")
+    oidc_client_id: str = Field("paripath-matrix", alias="MATRIX_OIDC_CLIENT_ID")
+    oidc_client_secret: SecretStr = Field(
+        SecretStr("dev-matrix-oidc-change-me"), alias="MATRIX_OIDC_CLIENT_SECRET"
+    )
+    oidc_provider_id: str = Field("oidc-keycloak", alias="MATRIX_OIDC_PROVIDER_ID")
+    callback_url: str = Field(
+        "http://localhost:8000/v1/chat/matrix/callback", alias="MATRIX_CALLBACK_URL"
+    )
+    post_login_url: str = Field("http://localhost:3000/chat", alias="MATRIX_POST_LOGIN_URL")
     server_name: str = Field("matrix.local", alias="MATRIX_SERVER_NAME")
     service_admin_user: str = Field("connectcarry-admin", alias="MATRIX_SERVICE_ADMIN_USER")
     service_admin_password: SecretStr = Field(
@@ -496,7 +499,6 @@ class MatrixSettings(EnvSettings):
     )
     admin_token: SecretStr = Field(SecretStr(""), alias="MATRIX_ADMIN_TOKEN")
     access_token_ttl_sec: int = Field(3600, alias="MATRIX_ACCESS_TOKEN_TTL_SEC")
-    session_cache_ttl_sec: int = Field(300, alias="MATRIX_SESSION_CACHE_TTL_SEC")
     registration_shared_secret: SecretStr = Field(
         SecretStr("dev-synapse-registration-secret-change-me"),
         alias="MATRIX_REGISTRATION_SHARED_SECRET",
@@ -533,11 +535,6 @@ class MatrixSettings(EnvSettings):
     def client_homeserver_url(self) -> str:
         """Browser-visible homeserver URL for matrix-js-sdk."""
         return (self.public_homeserver_url or self.homeserver_url).rstrip("/")
-
-    @property
-    def client_sliding_sync_url(self) -> str:
-        """Browser-visible sliding sync proxy URL."""
-        return self.sliding_sync_url.rstrip("/")
 
 
 class TypesenseSettings(EnvSettings):

@@ -119,17 +119,17 @@ class KeycloakAdminClient:
         last_exc: Exception | None = None
         start = datetime.now(UTC)
 
-        for attempt in range(max(1, settings.http.retry_attempts)):
+        retry_attempts = settings.http.retry_attempts if method in {"GET", "DELETE"} else 1
+        for attempt in range(max(1, retry_attempts)):
             try:
                 async with log_external_call(operation):
-                    from opentelemetry import trace
 
-                    tracer = trace.get_tracer(__name__)
-                    with tracer.start_as_current_span(f"keycloak.admin.{operation}"):
-                        response = await client.request(method, url, headers=headers, **kwargs)
-                if response.status_code >= 500 and attempt + 1 < settings.http.retry_attempts:
+                    response = await client.request(method, url, headers=headers, **kwargs)
+                if response.status_code >= 500 and attempt + 1 < retry_attempts:
                     await asyncio.sleep(0.2 * (attempt + 1))
                     continue
+                if method == "DELETE" and response.status_code == 404:
+                    return response
                 response.raise_for_status()
                 elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
                 _log_admin_response(
@@ -142,7 +142,7 @@ class KeycloakAdminClient:
                 return response
             except httpx.HTTPStatusError as exc:
                 last_exc = exc
-                if exc.response.status_code >= 500 and attempt + 1 < settings.http.retry_attempts:
+                if exc.response.status_code >= 500 and attempt + 1 < retry_attempts:
                     await asyncio.sleep(0.2 * (attempt + 1))
                     continue
                 elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
@@ -157,7 +157,7 @@ class KeycloakAdminClient:
                 raise _map_admin_error(exc) from exc
             except httpx.HTTPError as exc:
                 last_exc = exc
-                if attempt + 1 < settings.http.retry_attempts:
+                if attempt + 1 < retry_attempts:
                     await asyncio.sleep(0.2 * (attempt + 1))
                     continue
                 elapsed_ms = (datetime.now(UTC) - start).total_seconds() * 1000
@@ -265,15 +265,12 @@ class KeycloakAdminClient:
         start = datetime.now(UTC)
         try:
             async with log_external_call("create_user"):
-                from opentelemetry import trace
 
-                tracer = trace.get_tracer(__name__)
-                with tracer.start_as_current_span("keycloak.admin.create_user"):
-                    response = await client.post(
-                        url,
-                        headers={"Authorization": f"Bearer {auth_token}"},
-                        json=payload,
-                    )
+                response = await client.post(
+                    url,
+                    headers={"Authorization": f"Bearer {auth_token}"},
+                    json=payload,
+                )
             if response.status_code == 409:
                 existing = await self.find_user_by_email(email)
                 if existing:

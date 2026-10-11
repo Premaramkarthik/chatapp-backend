@@ -11,10 +11,6 @@ import httpx
 
 from core.config.settings import settings
 from core.logging.logger import get_logger, log_debug, log_warning
-from core.observability.prometheus_metrics import (
-    MATRIX_ADMIN_DURATION_SECONDS,
-    MATRIX_ADMIN_REQUESTS_TOTAL,
-)
 from v1.utils.base import MatrixIntegrationError
 
 logger = get_logger(__name__)
@@ -63,8 +59,8 @@ class SynapseAdminClient:
 
     async def verify_admin_access(self) -> None:
         """Confirm the current token can reach the Synapse Admin API."""
-        mxid = quote(self.service_admin_mxid, safe="")
-        await self._request("GET", f"/_synapse/admin/v2/users/{mxid}")
+        mxid = self.service_admin_mxid
+        await self._request("GET", f"/_synapse/admin/v2/users/{quote(mxid, safe='')}")
 
     async def _login_unlocked(self) -> str:
         """Login without acquiring the lock (caller must hold it)."""
@@ -142,7 +138,7 @@ class SynapseAdminClient:
         """Execute an admin API request and return parsed JSON."""
         url = f"{self._base_url}{path}"
         started = time.perf_counter()
-        operation = path.split("?")[0]
+        path.split("?")[0]
         token = await self.get_token()
         try:
             async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
@@ -156,16 +152,11 @@ class SynapseAdminClient:
                     await self.retry_login()
                     return await self._request(method, path, json=json, _retry=False)
                 response.raise_for_status()
-                MATRIX_ADMIN_REQUESTS_TOTAL.labels(operation=operation, status="success").inc()
                 if not response.content:
                     return {}
                 payload = response.json()
                 return payload if isinstance(payload, dict) else {"data": payload}
         except httpx.HTTPStatusError as exc:
-            MATRIX_ADMIN_REQUESTS_TOTAL.labels(
-                operation=operation,
-                status=str(exc.response.status_code),
-            ).inc()
             log_warning(
                 logger,
                 "Synapse admin request failed",
@@ -181,7 +172,6 @@ class SynapseAdminClient:
         except MatrixIntegrationError:
             raise
         except Exception as exc:
-            MATRIX_ADMIN_REQUESTS_TOTAL.labels(operation=operation, status="error").inc()
             log_warning(
                 logger,
                 "Synapse admin request error",
@@ -196,7 +186,6 @@ class SynapseAdminClient:
             ) from exc
         finally:
             duration = time.perf_counter() - started
-            MATRIX_ADMIN_DURATION_SECONDS.labels(operation=operation).observe(duration)
             log_debug(
                 logger,
                 "Synapse admin request completed",
@@ -210,18 +199,44 @@ class SynapseAdminClient:
         self,
         *,
         mxid: str,
-        password: str,
+        password: str | None = None,
+        subject: str | None = None,
         displayname: str | None = None,
     ) -> dict[str, Any]:
         """Create or update a Matrix user account."""
         body: dict[str, Any] = {
-            "password": password,
             "admin": False,
             "deactivated": False,
         }
+        if password is not None:
+            body["password"] = password
+        if subject:
+            existing = None
+            try:
+                existing = await self._request(
+                    "GET", f"/_synapse/admin/v2/users/{quote(mxid, safe='')}"
+                )
+            except MatrixIntegrationError as exc:
+                if (exc.context or {}).get("status_code") != 404:
+                    raise
+            links = (existing or {}).get("external_ids", [])
+            own = [
+                link
+                for link in links
+                if link.get("auth_provider") == settings.matrix.oidc_provider_id
+            ]
+            if own and any(link.get("external_id") != subject for link in own):
+                raise MatrixIntegrationError("Matrix account linking required")
+            body["external_ids"] = [
+                link
+                for link in links
+                if link.get("auth_provider") != settings.matrix.oidc_provider_id
+            ] + [{"auth_provider": settings.matrix.oidc_provider_id, "external_id": subject}]
         if displayname:
             body["displayname"] = displayname
-        return await self._request("PUT", f"/_synapse/admin/v2/users/{mxid}", json=body)
+        return await self._request(
+            "PUT", f"/_synapse/admin/v2/users/{quote(mxid, safe='')}", json=body
+        )
 
     async def create_login_token(
         self,
@@ -229,13 +244,13 @@ class SynapseAdminClient:
         mxid: str,
         valid_until_ms: int | None = None,
     ) -> dict[str, Any]:
-        """Issue a short-lived access token for matrix-js-sdk login."""
+        """Issue a bounded internal provisioning token; never expose it to browsers."""
         body: dict[str, Any] = {}
         if valid_until_ms is not None:
             body["valid_until_ms"] = valid_until_ms
         return await self._request(
             "POST",
-            f"/_synapse/admin/v1/users/{mxid}/login",
+            f"/_synapse/admin/v1/users/{quote(mxid, safe='')}/login",
             json=body or None,
         )
 
@@ -243,15 +258,28 @@ class SynapseAdminClient:
         """Deactivate a Matrix user account."""
         return await self._request(
             "POST",
-            f"/_synapse/admin/v1/deactivate/{mxid}",
+            f"/_synapse/admin/v1/deactivate/{quote(mxid, safe='')}",
             json={"erase": False},
         )
+
+    async def delete_device(self, *, mxid: str, device_id: str) -> None:
+        """Invalidate the real device and its tokens; retrying missing devices succeeds."""
+        try:
+            await self._request(
+                "DELETE",
+                f"/_synapse/admin/v2/users/{quote(mxid, safe='')}/devices/"
+                f"{quote(device_id, safe='')}",
+                json={},
+            )
+        except MatrixIntegrationError as exc:
+            if (exc.context or {}).get("status_code") != 404:
+                raise
 
     async def search_users(self, *, search_term: str, limit: int = 10) -> list[dict[str, Any]]:
         """Search users via Synapse admin user directory."""
         payload = await self._request(
             "GET",
-            f"/_synapse/admin/v2/users?search_term={search_term}&limit={limit}",
+            f"/_synapse/admin/v2/users?search_term={quote(search_term, safe='')}&limit={limit}",
         )
         users = payload.get("users")
         return users if isinstance(users, list) else []

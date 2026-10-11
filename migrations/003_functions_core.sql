@@ -227,7 +227,6 @@ BEGIN
           AND (
               keycloak_sub IS NULL
               OR keycloak_sub = payload->>'keycloak_sub'
-              OR status = 'pending_verification'
           )
         RETURNING * INTO result;
 
@@ -266,6 +265,7 @@ BEGIN
                 UPDATE users
                 SET keycloak_sub = payload->>'keycloak_sub'
                 WHERE id = result.id
+                  AND (keycloak_sub IS NULL OR keycloak_sub = payload->>'keycloak_sub')
                 RETURNING * INTO result;
             END IF;
         END IF;

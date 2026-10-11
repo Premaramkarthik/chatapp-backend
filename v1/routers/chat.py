@@ -5,13 +5,11 @@ from __future__ import annotations
 from typing import Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response, status
+from fastapi.responses import RedirectResponse
 
 from core.config.settings import settings
-from core.observability.prometheus_metrics import (
-    MATRIX_MEDIA_FAILED_TOTAL,
-    MATRIX_MEDIA_UPLOAD_TOTAL,
-)
+from domains.auth.models import AuthSession
 from domains.chat.permissions import (
     InboxStatusFilter,
     assert_can_chat,
@@ -32,7 +30,7 @@ from infrastructure.database.jsonb_helpers import row_from_jsonb
 from infrastructure.database.repositories.conversations import PostgresConversationRepository
 from infrastructure.database.repositories.matching import PostgresMatchingRepository
 from infrastructure.database.repositories.users import PostgresUserRepository
-from v1.dependencies.auth import get_current_principal, require_capability
+from v1.dependencies.auth import get_current_auth_session, get_current_principal, require_capability
 from v1.schemas.chat import (
     AttachmentMetadataRequest,
     AttachmentMetadataResponse,
@@ -58,6 +56,7 @@ from v1.utils.request_context import request_id_from
 
 router = APIRouter(prefix="/v1/chat", tags=["chat"])
 CurrentPrincipal = Annotated[KeycloakPrincipal, Depends(get_current_principal)]
+CurrentBffSession = Annotated[AuthSession, Depends(get_current_auth_session)]
 MessageSender = Annotated[KeycloakPrincipal, Depends(require_capability("message:send"))]
 
 
@@ -233,11 +232,48 @@ async def reopen_conversation(
     return _mapping_response(mapping, can_chat=can_chat, is_user_archived=False)
 
 
+@router.post("/matrix/signin/start", summary="Start device-bound Synapse SSO")
+async def start_matrix_signin(
+    bff_session: CurrentBffSession, _: MessageSender, principal: CurrentPrincipal
+) -> dict:
+    user = await _local_user(principal)
+    try:
+        return await matrix_session_service.start_login(user=user, bff_session_id=bff_session.id)
+    except MatrixSessionNotReadyError as exc:
+        raise HTTPException(409, detail={"code": str(exc)}) from exc
+
+
+@router.get("/matrix/callback", summary="Complete single-use Matrix SSO")
+async def matrix_callback(
+    bff_session: CurrentBffSession,
+    _: MessageSender,
+    principal: CurrentPrincipal,
+    state: str = Query(min_length=20, max_length=256),
+    loginToken: str = Query(min_length=1, max_length=4096),
+) -> RedirectResponse:
+    from domains.matrix.session.service import validate_matrix_urls
+
+    validate_matrix_urls()
+    try:
+        await matrix_session_service.complete_login(
+            state=state, login_token=loginToken, bff_session_id=bff_session.id
+        )
+    except MatrixSessionNotReadyError as exc:
+        raise HTTPException(409, detail={"code": "matrix_login_required"}) from exc
+    return RedirectResponse(
+        settings.matrix.post_login_url,
+        status_code=303,
+        headers={"Cache-Control": "no-store", "Referrer-Policy": "no-referrer"},
+    )
+
+
 @router.get(
     "/matrix/session", response_model=MatrixSessionResponse, summary="Get Matrix client session"
 )
 async def get_matrix_session(
     request: Request,
+    bff_session: CurrentBffSession,
+    response: Response,
     _: MessageSender,
     principal: CurrentPrincipal,
 ) -> MatrixSessionResponse:
@@ -245,10 +281,14 @@ async def get_matrix_session(
     try:
         session = await matrix_session_service.create_session(
             user=user,
+            bff_session_id=bff_session.id,
             request_id=request_id_from(request),
         )
     except MatrixSessionNotReadyError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail={"code": "matrix_login_required"}
+        ) from exc
+    response.headers["Cache-Control"] = "no-store"
     return MatrixSessionResponse(enabled=True, **session)
 
 
@@ -257,10 +297,12 @@ async def get_matrix_session(
 )
 async def create_matrix_session(
     request: Request,
+    bff_session: CurrentBffSession,
+    response: Response,
     _: MessageSender,
     principal: CurrentPrincipal,
 ) -> MatrixSessionResponse:
-    return await get_matrix_session(request, _, principal)
+    return await get_matrix_session(request, bff_session, response, _, principal)
 
 
 @router.post(
@@ -270,6 +312,8 @@ async def create_matrix_session(
 )
 async def refresh_matrix_session(
     request: Request,
+    bff_session: CurrentBffSession,
+    response: Response,
     _: MessageSender,
     principal: CurrentPrincipal,
 ) -> MatrixSessionResponse:
@@ -277,11 +321,64 @@ async def refresh_matrix_session(
     try:
         session = await matrix_session_service.refresh_session(
             user=user,
+            bff_session_id=bff_session.id,
             request_id=request_id_from(request),
         )
     except MatrixSessionNotReadyError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail={"code": "matrix_login_required"}
+        ) from exc
+    response.headers["Cache-Control"] = "no-store"
     return MatrixSessionResponse(enabled=True, **session)
+
+
+@router.post("/matrix/rooms/membership", summary="Reconcile joined Matrix membership")
+async def reconcile_room_membership(
+    request: Request,
+    bff_session: CurrentBffSession,
+    _: MessageSender,
+    principal: CurrentPrincipal,
+    room_id: str = Query(min_length=3, max_length=512),
+) -> dict:
+    from urllib.parse import quote
+
+    import httpx
+
+    from domains.matrix.authorization import require_room_access
+    from infrastructure.database.connection import execute, fetchrow
+
+    user = await _local_user(principal)
+    await require_room_access(str(user["id"]), room_id)
+    credentials = await matrix_session_service.create_session(
+        user=user, bff_session_id=bff_session.id
+    )
+    try:
+        async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as http:
+            response = await http.get(
+                f'{settings.matrix.homeserver_url.rstrip("/")}/_matrix/client/v3/rooms/{quote(room_id,safe="")}/joined_members',
+                headers={"Authorization": "Bearer " + credentials["access_token"]},
+            )
+    except httpx.HTTPError as exc:
+        raise HTTPException(503, detail={"code": "matrix_membership_unavailable"}) from exc
+    if response.status_code != 200:
+        raise HTTPException(503, detail={"code": "matrix_membership_unavailable"})
+    expected = await fetchrow(
+        """SELECT a.mxid AS a,b.mxid AS b FROM matrix_room_mappings m
+      JOIN user_connections c ON c.id=m.user_connection_id
+      JOIN matrix_user_mappings a ON a.user_id=c.user_a_id
+      JOIN matrix_user_mappings b ON b.user_id=c.user_b_id WHERE m.room_id=$1""",
+        room_id,
+    )
+    joined = bool(
+        expected and set(response.json().get("joined", {})) == {expected["a"], expected["b"]}
+    )
+    if joined:
+        await execute(
+            """UPDATE matrix_room_mappings SET status='joined',updated_at=now()
+            WHERE room_id=$1 AND status IN ('invited','joined','active')""",
+            room_id,
+        )
+    return {"status": "joined" if joined else "invited"}
 
 
 @router.get("/devices", response_model=MatrixDevicesResponse, summary="List Matrix devices")
@@ -444,20 +541,7 @@ async def search_messages(
     q: str = Query(min_length=1),
     room_id: str | None = None,
 ) -> dict:
-    user = await _local_user(principal)
-    try:
-        results = await matrix_search_service.search_messages(
-            user=user,
-            search_term=q,
-            room_id=room_id,
-        )
-    except MatrixSessionNotReadyError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
-    return {
-        "results": results,
-        "search_scope": "server",
-        "note": "Encrypted room bodies may require client-side timeline search.",
-    }
+    raise HTTPException(410, detail={"code": "matrix_client_search_required"})
 
 
 @router.get("/search/rooms", summary="Search rooms")
@@ -478,8 +562,10 @@ async def search_attachments(
     room_id: str | None = None,
     mimetype: str | None = None,
 ) -> dict:
-    await _local_user(principal)
-    results = await matrix_search_service.search_attachments(room_id=room_id, mimetype=mimetype)
+    user = await _local_user(principal)
+    results = await matrix_search_service.search_attachments(
+        user_id=str(user["id"]), room_id=room_id, mimetype=mimetype
+    )
     return {"results": results}
 
 
@@ -495,7 +581,6 @@ async def record_attachment_metadata(
 ) -> AttachmentMetadataResponse:
     user = await _local_user(principal)
     if not await matrix_rate_limiter.check_media_limit(user["id"]):
-        MATRIX_MEDIA_FAILED_TOTAL.inc()
         raise HTTPException(
             status_code=status.HTTP_429_TOO_MANY_REQUESTS, detail="Media rate limit"
         )
@@ -506,7 +591,6 @@ async def record_attachment_metadata(
             settings.matrix.video_max_bytes,
         )
         if payload.size_bytes > max_bytes:
-            MATRIX_MEDIA_FAILED_TOTAL.inc()
             raise HTTPException(
                 status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE, detail="File too large"
             )
@@ -519,7 +603,6 @@ async def record_attachment_metadata(
         sha256=payload.sha256,
         thumbnail_event_id=payload.thumbnail_event_id,
     )
-    MATRIX_MEDIA_UPLOAD_TOTAL.inc()
     return AttachmentMetadataResponse(**row)
 
 
@@ -581,7 +664,7 @@ async def publish_business_event(
     try:
         assert_can_chat(perms)
     except ValueError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(409, detail={"code": "matrix_room_access_denied"}) from exc
     event_type = (
         payload.event_type
         if payload.event_type.startswith("com.paripath.")
@@ -597,4 +680,6 @@ async def publish_business_event(
             aggregate_id=payload.aggregate_id,
         )
     except MatrixSessionNotReadyError as exc:
-        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc)) from exc
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT, detail={"code": "matrix_login_required"}
+        ) from exc

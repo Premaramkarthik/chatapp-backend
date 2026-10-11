@@ -1,13 +1,11 @@
 """Health and system routes."""
 
 from fastapi import APIRouter, Response, status
-from fastapi.responses import PlainTextResponse
-from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 
 from core.config.settings import settings
 from infrastructure.database.connection import call_json_function
 from infrastructure.keycloak.adapter import keycloak_verifier
-from infrastructure.matrix.health import matrix_admin_health, matrix_health, sliding_sync_health
+from infrastructure.matrix.health import matrix_admin_health, matrix_health
 from infrastructure.typesense.health import health as typesense_health
 
 router = APIRouter(tags=["health"])
@@ -31,7 +29,6 @@ async def ready(response: Response) -> dict:
     if settings.matrix.enabled:
         checks["matrix"] = (await matrix_health()).__dict__
         checks["matrix_admin"] = (await matrix_admin_health()).__dict__
-        checks["sliding_sync"] = (await sliding_sync_health()).__dict__
     ok = all(check["ok"] for check in checks.values())
     if not ok:
         response.status_code = status.HTTP_503_SERVICE_UNAVAILABLE
@@ -46,12 +43,6 @@ async def version() -> dict[str, str]:
         "version": settings.app.version,
         "environment": settings.app.environment,
     }
-
-
-@router.get("/metrics", response_class=PlainTextResponse)
-async def metrics() -> Response:
-    """Expose Prometheus metrics (also registered by Instrumentator)."""
-    return Response(content=generate_latest(), media_type=CONTENT_TYPE_LATEST)
 
 
 async def _check_database() -> dict[str, str | bool]:

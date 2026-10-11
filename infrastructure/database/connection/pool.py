@@ -8,7 +8,7 @@ import asyncpg
 
 from core.config.settings import settings
 from core.logging.logger import get_logger, log_error, log_exception, log_info, log_warning
-from core.observability.db_instrumentation import db_operation, update_pool_gauges
+from core.observability.db_instrumentation import db_operation
 from infrastructure.database.connection.pool_instrumentation import (
     close_pool_with_instrumentation,
     db_target_label,
@@ -254,7 +254,6 @@ async def fetchrow(query: str, *args: Any) -> asyncpg.Record | None:
 async def _fetchrow(query: str, *args: Any) -> asyncpg.Record | None:
     pool = await get_pool()
     async with pool.acquire() as connection:
-        update_pool_gauges(pool.raw_pool if hasattr(pool, "raw_pool") else pool)
         return await connection.fetchrow(query, *args)
 
 
@@ -267,7 +266,6 @@ async def fetch(query: str, *args: Any) -> list[asyncpg.Record]:
 async def _fetch(query: str, *args: Any) -> list[asyncpg.Record]:
     pool = await get_pool()
     async with pool.acquire() as connection:
-        update_pool_gauges(pool.raw_pool if hasattr(pool, "raw_pool") else pool)
         return list(await connection.fetch(query, *args))
 
 
@@ -280,7 +278,6 @@ async def execute(query: str, *args: Any) -> str:
 async def _execute(query: str, *args: Any) -> str:
     pool = await get_pool()
     async with pool.acquire() as connection:
-        update_pool_gauges(pool.raw_pool if hasattr(pool, "raw_pool") else pool)
         return await connection.execute(query, *args)
 
 
@@ -293,7 +290,6 @@ async def call_json_function(function_name: str, mode: int, payload: dict[str, A
 async def _call_json_function(function_name: str, mode: int, payload: dict[str, Any]) -> Any:
     pool = await get_pool()
     async with pool.acquire() as connection:
-        update_pool_gauges(pool.raw_pool if hasattr(pool, "raw_pool") else pool)
         row = await connection.fetchrow(
             f"SELECT {function_name}($1, $2::jsonb) AS result",
             mode,

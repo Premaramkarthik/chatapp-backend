@@ -14,12 +14,8 @@ from infrastructure.keycloak.smtp_config import _client_credentials_token
 
 logger = get_logger(__name__)
 
-# First-broker-login flow: new Google users are created; existing emails auto-link.
-GOOGLE_BROKER_FLOW_ALIAS = "chatapp-google-auto-link"
-_BROKER_FLOW_EXECUTIONS: tuple[tuple[str, str], ...] = (
-    ("idp-create-user-if-unique", "ALTERNATIVE"),
-    ("idp-auto-link", "ALTERNATIVE"),
-)
+# Built-in first broker login requires explicit ownership confirmation.
+GOOGLE_BROKER_FLOW_ALIAS = "first broker login"
 
 
 def build_google_idp_payload() -> dict[str, Any] | None:
@@ -73,19 +69,7 @@ def _uri_localhost_mirror(uri: str) -> str | None:
 
 
 def _collect_web_redirect_uris() -> set[str]:
-    """Collect BFF and frontend redirect URIs from auth settings."""
-    uris = {
-        settings.auth.callback_url,
-        settings.auth.default_post_signin_redirect_url,
-        settings.auth.email_verify_redirect_url,
-    }
-    expanded: set[str] = set()
-    for uri in uris:
-        expanded.add(uri)
-        mirror = _uri_localhost_mirror(uri)
-        if mirror:
-            expanded.add(mirror)
-    return expanded
+    return {settings.auth.callback_url}
 
 
 def _collect_web_origins() -> set[str]:
@@ -99,18 +83,7 @@ def _collect_web_origins() -> set[str]:
 
 
 def _collect_post_logout_redirect_uris() -> set[str]:
-    """Build wildcard post-logout redirect patterns from auth settings."""
-    parsed = urlparse(settings.auth.post_logout_redirect_url.rstrip("/"))
-    if not parsed.scheme or not parsed.netloc:
-        return set()
-
-    patterns = {f"{parsed.scheme}://{parsed.netloc}/*"}
-    mirror = _uri_localhost_mirror(f"{parsed.scheme}://{parsed.netloc}/")
-    if mirror:
-        mirror_parsed = urlparse(mirror)
-        if mirror_parsed.scheme and mirror_parsed.netloc:
-            patterns.add(f"{mirror_parsed.scheme}://{mirror_parsed.netloc}/*")
-    return patterns
+    return {settings.auth.post_logout_redirect_url}
 
 
 def _parse_post_logout_attribute(attributes: dict[str, Any] | None) -> set[str]:
@@ -186,21 +159,16 @@ async def _ensure_web_client_redirect_uris(client: httpx.AsyncClient) -> None:
     required_redirects = _collect_web_redirect_uris()
     required_origins = _collect_web_origins()
     required_post_logout = _collect_post_logout_redirect_uris()
-    current_redirects = set(client_payload.get("redirectUris") or [])
-    current_origins = set(client_payload.get("webOrigins") or [])
     attributes = dict(client_payload.get("attributes") or {})
-    current_post_logout = _parse_post_logout_attribute(attributes)
 
-    merged_redirects = sorted(current_redirects | required_redirects)
-    merged_origins = sorted(current_origins | required_origins)
-    merged_post_logout = current_post_logout | required_post_logout
-    if (
-        merged_redirects == sorted(current_redirects)
-        and merged_origins == sorted(current_origins)
-        and merged_post_logout == current_post_logout
-    ):
-        return
+    merged_redirects = sorted(required_redirects)
+    merged_origins = sorted(required_origins)
+    merged_post_logout = required_post_logout
 
+    client_payload["publicClient"] = False
+    client_payload["secret"] = keycloak.web_client_secret_value
+    client_payload["directAccessGrantsEnabled"] = False
+    attributes["pkce.code.challenge.method"] = "S256"
     client_payload["redirectUris"] = merged_redirects
     client_payload["webOrigins"] = merged_origins
     if merged_post_logout:
@@ -223,96 +191,13 @@ async def _ensure_web_client_redirect_uris(client: httpx.AsyncClient) -> None:
     )
 
 
-async def _flow_alias_exists(client: httpx.AsyncClient, *, flow_alias: str) -> bool:
-    """Return True when an authentication flow alias already exists in the realm."""
-    keycloak = settings.keycloak
-    flows_url = f"{keycloak.admin_realm_url}/authentication/flows"
-    response = await _request_with_admin_fallback(client=client, method="GET", url=flows_url)
-    response.raise_for_status()
-    return any(item.get("alias") == flow_alias for item in response.json())
-
-
-async def _sync_broker_flow_requirements(client: httpx.AsyncClient) -> None:
-    """Enable auto-link broker authenticators on the configured flow."""
-    keycloak = settings.keycloak
-    flows_url = f"{keycloak.admin_realm_url}/authentication/flows"
-    list_response = await _request_with_admin_fallback(
-        client=client,
-        method="GET",
-        url=f"{flows_url}/{GOOGLE_BROKER_FLOW_ALIAS}/executions",
-    )
-    list_response.raise_for_status()
-    executions = list_response.json()
-    providers = {item.get("providerId"): item for item in executions}
-    update_url = f"{flows_url}/{GOOGLE_BROKER_FLOW_ALIAS}/executions"
-    for provider, requirement in _BROKER_FLOW_EXECUTIONS:
-        execution = providers.get(provider)
-        if execution is None:
-            log_warning(
-                logger,
-                "Broker flow execution is missing from Keycloak",
-                flow=GOOGLE_BROKER_FLOW_ALIAS,
-                provider=provider,
-            )
-            continue
-        if execution.get("requirement") == requirement:
-            continue
-        execution_id = execution.get("id")
-        if not execution_id:
-            continue
-        update_response = await _request_with_admin_fallback(
-            client=client,
-            method="PUT",
-            url=update_url,
-            json={"id": execution_id, "requirement": requirement},
-        )
-        update_response.raise_for_status()
-
-
-async def _create_broker_auto_link_flow(client: httpx.AsyncClient) -> None:
-    """Create the Google first-broker-login flow that auto-links by email."""
-    keycloak = settings.keycloak
-    flows_url = f"{keycloak.admin_realm_url}/authentication/flows"
-    create_response = await _request_with_admin_fallback(
-        client=client,
-        method="POST",
-        url=flows_url,
-        json={
-            "alias": GOOGLE_BROKER_FLOW_ALIAS,
-            "description": "Auto-link Google accounts by email; create user when unique",
-            "providerId": "basic-flow",
-            "topLevel": True,
-            "builtIn": False,
-        },
-    )
-    create_response.raise_for_status()
-
-    flow_executions_url = f"{flows_url}/{GOOGLE_BROKER_FLOW_ALIAS}/executions/execution"
-    for provider, _requirement in _BROKER_FLOW_EXECUTIONS:
-        add_response = await _request_with_admin_fallback(
-            client=client,
-            method="POST",
-            url=flow_executions_url,
-            json={"provider": provider},
-        )
-        add_response.raise_for_status()
-
-    await _sync_broker_flow_requirements(client)
-
-
-async def _ensure_google_broker_auto_link_flow(client: httpx.AsyncClient) -> None:
-    """Ensure Keycloak uses auto-link first broker login for Google sign-in."""
-    created = not await _flow_alias_exists(client, flow_alias=GOOGLE_BROKER_FLOW_ALIAS)
-    if created:
-        await _create_broker_auto_link_flow(client)
-        log_debug(
-            logger,
-            "Configured Google broker auto-link flow in Keycloak",
-            realm=settings.keycloak.realm,
-            flow=GOOGLE_BROKER_FLOW_ALIAS,
-        )
+async def ensure_keycloak_web_client() -> None:
+    """Merge auth redirect, origin, and post-logout URIs into chatapp-web."""
+    if not settings.keycloak.enabled:
         return
-    await _sync_broker_flow_requirements(client)
+
+    async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
+        await _ensure_web_client_redirect_uris(client)
 
 
 async def _upsert_google_idp(
@@ -349,15 +234,6 @@ async def _upsert_google_idp(
     update_response.raise_for_status()
 
 
-async def ensure_keycloak_web_client() -> None:
-    """Merge auth redirect, origin, and post-logout URIs into chatapp-web."""
-    if not settings.keycloak.enabled:
-        return
-
-    async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
-        await _ensure_web_client_redirect_uris(client)
-
-
 async def ensure_keycloak_google_idp() -> None:
     """Configure Google IdP and web client redirects when Google OAuth env vars are set."""
     if not settings.keycloak.enabled:
@@ -369,7 +245,6 @@ async def ensure_keycloak_google_idp() -> None:
 
     async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
         await _ensure_web_client_redirect_uris(client)
-        await _ensure_google_broker_auto_link_flow(client)
         await _upsert_google_idp(client, idp_payload=idp_payload)
 
     log_debug(

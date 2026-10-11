@@ -11,7 +11,6 @@ from typing import Protocol
 from fastapi import HTTPException, status
 from starlette.types import ASGIApp, Receive, Scope, Send
 
-from core.observability.prometheus_metrics import RATE_LIMIT_EXCEEDED_TOTAL
 from infrastructure.redis.cache import auth_redis_cache
 from v1.middleware.state import RATE_LIMIT_STATE_KEY, ensure_state
 
@@ -94,7 +93,6 @@ class RateLimitMiddleware:
         )
         ensure_state(scope)[RATE_LIMIT_STATE_KEY] = decision
         if not decision.allowed:
-            RATE_LIMIT_EXCEEDED_TOTAL.labels(path=scope["path"]).inc()
             raise HTTPException(
                 status_code=status.HTTP_429_TOO_MANY_REQUESTS,
                 detail="Rate limit exceeded",

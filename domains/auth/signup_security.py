@@ -126,6 +126,8 @@ def decide_account_linking(
     incoming_identity_provider: str | None,
 ) -> AccountLinkDecision:
     """Apply conservative account linking policy."""
+    if existing_keycloak_sub is not None and existing_keycloak_sub != incoming_keycloak_sub:
+        return AccountLinkDecision.REQUIRE_LINKING
     if existing_status in {"active", "pending_profile_setup"}:
         if existing_keycloak_sub == incoming_keycloak_sub:
             return AccountLinkDecision.ALLOW_PENDING_MATCH

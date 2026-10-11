@@ -15,6 +15,7 @@ from v1.utils.base import KeycloakIntegrationError
 async def test_create_user_returns_existing_on_conflict() -> None:
     """409 responses fall back to email lookup."""
     admin = KeycloakAdminClient()
+    admin.get_admin_token = AsyncMock(return_value="token")
     admin.get_admin_token = AsyncMock(return_value="token")  # type: ignore[method-assign]
     admin.find_user_by_email = AsyncMock(return_value="existing-id")  # type: ignore[method-assign]
     admin.assign_client_roles = AsyncMock()  # type: ignore[method-assign]
@@ -39,6 +40,7 @@ async def test_create_user_returns_existing_on_conflict() -> None:
 async def test_delete_user_calls_admin_api() -> None:
     """delete_user issues DELETE to Keycloak Admin REST."""
     admin = KeycloakAdminClient()
+    admin.get_admin_token = AsyncMock(return_value="token")
     admin._request = AsyncMock()  # type: ignore[method-assign]
 
     await admin.delete_user("kc-user-id")
@@ -50,6 +52,7 @@ async def test_delete_user_calls_admin_api() -> None:
 async def test_client_exists_false_when_missing() -> None:
     """client_exists returns False when client lookup fails."""
     admin = KeycloakAdminClient()
+    admin.get_admin_token = AsyncMock(return_value="token")
     admin._client_uuid = AsyncMock(  # type: ignore[method-assign]
         side_effect=KeycloakIntegrationError("missing", context={"client_id": "x"}),
     )
@@ -60,6 +63,7 @@ async def test_client_exists_false_when_missing() -> None:
 async def test_clear_required_actions_clears_user_fields() -> None:
     """clear_required_actions issues an empty requiredActions update."""
     admin = KeycloakAdminClient()
+    admin.get_admin_token = AsyncMock(return_value="token")
     admin.update_user = AsyncMock()  # type: ignore[method-assign]
 
     await admin.clear_required_actions(user_id="user-123")
@@ -74,6 +78,7 @@ async def test_clear_required_actions_clears_user_fields() -> None:
 async def test_mark_email_verified_updates_user_field() -> None:
     """mark_email_verified sets Keycloak emailVerified=true."""
     admin = KeycloakAdminClient()
+    admin.get_admin_token = AsyncMock(return_value="token")
     admin.update_user = AsyncMock()  # type: ignore[method-assign]
 
     await admin.mark_email_verified(user_id="user-123")
@@ -88,6 +93,7 @@ async def test_mark_email_verified_updates_user_field() -> None:
 async def test_logout_user_sessions_calls_admin_logout_endpoint() -> None:
     """logout_user_sessions issues POST to the Keycloak user logout endpoint."""
     admin = KeycloakAdminClient()
+    admin.get_admin_token = AsyncMock(return_value="token")
     admin.get_admin_token = AsyncMock(return_value="token")  # type: ignore[method-assign]
     admin._request = AsyncMock()  # type: ignore[method-assign]
 
@@ -103,6 +109,7 @@ async def test_logout_user_sessions_calls_admin_logout_endpoint() -> None:
 async def test_send_account_setup_email_is_verify_only() -> None:
     """Legacy setup email path must not trigger execute-actions wizard."""
     admin = KeycloakAdminClient()
+    admin.get_admin_token = AsyncMock(return_value="token")
     admin.clear_required_actions = AsyncMock()  # type: ignore[method-assign]
     admin.send_verify_email = AsyncMock()  # type: ignore[method-assign]
 

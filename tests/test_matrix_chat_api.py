@@ -2,8 +2,8 @@
 
 from __future__ import annotations
 
+from types import SimpleNamespace
 from typing import Any
-from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
@@ -18,7 +18,7 @@ from domains.matrix.provisioning.service import (
 from domains.matrix.rooms.service import MatrixRoomProvisionError, MatrixRoomService
 from domains.matrix.session.service import MatrixSessionNotReadyError, MatrixSessionService
 from main import app
-from v1.dependencies.auth import get_current_principal
+from v1.dependencies.auth import get_current_auth_session, get_current_principal
 from v1.schemas.principal import KeycloakPrincipal
 
 
@@ -38,40 +38,10 @@ async def test_matrix_session_not_ready_when_disabled(monkeypatch: pytest.Monkey
 
 
 @pytest.mark.asyncio
-async def test_matrix_session_returns_credentials(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_matrix_session_requires_bff_ownership(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setattr("domains.matrix.session.service.settings.matrix.enabled", True)
-
-    class FakeUsers:
-        async def get_by_user_id(self, user_id: str) -> dict[str, Any]:
-            return {
-                "user_id": user_id,
-                "mxid": "@u1:matrix.local",
-                "provision_status": "active",
-            }
-
-    async def fake_login(*, mxid: str, valid_until_ms: int | None = None) -> dict[str, Any]:
-        return {"access_token": "tok", "device_id": "DEV1"}
-
-    async def fake_cache(*args: Any, **kwargs: Any) -> None:
-        return None
-
-    monkeypatch.setattr("domains.matrix.session.service.PostgresMatrixUserRepository", FakeUsers)
-    monkeypatch.setattr(
-        "domains.matrix.session.service.synapse_admin_client.create_login_token",
-        fake_login,
-    )
-    monkeypatch.setattr("domains.matrix.session.service.cache_matrix_session", fake_cache)
-    monkeypatch.setattr(
-        "domains.matrix.session.service.get_cached_matrix_session",
-        AsyncMock(return_value=None),
-    )
-
-    payload = await MatrixSessionService().create_session(
-        user={"id": "u1", "email": "a@b.com", "display_name": "A"},
-    )
-    assert payload["access_token"] == "tok"
-    assert payload["matrix_user_id"] == "@u1:matrix.local"
-    assert "homeserver_url" in payload
+    with pytest.raises(MatrixSessionNotReadyError, match="matrix_login_required"):
+        await MatrixSessionService().create_session(user={"id": "u1"})
 
 
 @pytest.mark.asyncio
@@ -180,6 +150,7 @@ def test_matrix_session_route_conflict_when_not_ready(monkeypatch: pytest.Monkey
 
     monkeypatch.setattr("v1.routers.chat._local_user", fake_user)
     monkeypatch.setattr("v1.routers.chat.matrix_session_service.create_session", fake_session)
+    app.dependency_overrides[get_current_auth_session] = lambda: SimpleNamespace(id=str(uuid4()))
 
     with TestClient(app) as client:
         response = client.get("/v1/chat/matrix/session")

@@ -10,7 +10,7 @@ This document records the backend migration from legacy role terminology to the 
 
 ## Database changes
 
-### Data migration (`009_explorer_connector_role_migration.sql`)
+### Data migration (`011_explorer_connector_role_migration.sql`)
 
 | Table / column | Change |
 | --- | --- |

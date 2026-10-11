@@ -24,7 +24,22 @@ def _load_realm_template() -> dict[str, object]:
             f"{REALM_TEMPLATE_PATH.relative_to(REPO_ROOT)}",
             context={"path": str(REALM_TEMPLATE_PATH)},
         )
-    return json.loads(REALM_TEMPLATE_PATH.read_text(encoding="utf-8"))
+    payload = json.loads(REALM_TEMPLATE_PATH.read_text(encoding="utf-8"))
+    for client in payload["clients"]:
+        if client["clientId"] == settings.keycloak.web_client_id:
+            client["secret"] = settings.keycloak.web_client_secret_value
+            client["redirectUris"] = [settings.auth.callback_url]
+            client["attributes"][
+                "post.logout.redirect.uris"
+            ] = settings.auth.post_logout_redirect_url
+        if client["clientId"] == settings.matrix.oidc_client_id:
+            client["secret"] = settings.matrix.oidc_client_secret.get_secret_value()
+            client["redirectUris"] = [
+                settings.matrix.client_homeserver_url + "/_synapse/client/oidc/callback"
+            ]
+        if client["clientId"] == settings.keycloak.admin_client_id:
+            client["secret"] = settings.keycloak.admin_client_secret_value
+    return payload
 
 
 async def ensure_keycloak_realm() -> None:

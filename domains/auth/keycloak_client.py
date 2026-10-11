@@ -11,12 +11,6 @@ import jwt
 
 from core.config.settings import settings
 from core.logging.logger import get_logger
-from core.observability.prometheus_metrics import (
-    AUTH_REFRESH_FAILURE_TOTAL,
-    KEYCLOAK_FAILURES_TOTAL,
-    KEYCLOAK_REQUEST_DURATION_SECONDS,
-    KEYCLOAK_REQUESTS_TOTAL,
-)
 from domains.auth.models import TokenSet
 from infrastructure.keycloak.admin_client import KeycloakAdminClient, keycloak_admin_client
 from v1.utils.base import AuthenticationError, KeycloakIntegrationError
@@ -38,6 +32,7 @@ class KeycloakAuthClient:
         code_challenge: str,
         redirect_uri: str,
         identity_provider: str | None = None,
+        intent: str = "signin",
     ) -> str:
         """Build a browser authorization URL."""
         params = {
@@ -53,8 +48,11 @@ class KeycloakAuthClient:
         if identity_provider:
             params["kc_idp_hint"] = identity_provider
             params["prompt"] = "select_account"
+        endpoint = settings.keycloak.authorization_endpoint
+        if intent == "signup":
+            endpoint = endpoint.rsplit("/", 1)[0] + "/registrations"
         query = urlencode(params)
-        return f"{settings.keycloak.authorization_endpoint}?{query}"
+        return f"{endpoint}?{query}"
 
     async def exchange_code(
         self,
@@ -84,19 +82,6 @@ class KeycloakAuthClient:
             "refresh_token": refresh_token,
         }
         data = await self._post_token(payload, operation="refresh_token")
-        return _token_set_from_response(data)
-
-    async def password_grant(self, *, username: str, password: str) -> TokenSet:
-        """Exchange email/password for tokens via the confidential web client."""
-        payload = {
-            "grant_type": "password",
-            "client_id": settings.keycloak.web_client_id,
-            "client_secret": settings.keycloak.web_client_secret_value,
-            "username": username,
-            "password": password,
-            "scope": "openid email profile",
-        }
-        data = await self._post_token(payload, operation="password_grant")
         return _token_set_from_response(data)
 
     async def send_password_reset_email(self, *, email: str) -> bool:
@@ -181,32 +166,19 @@ class KeycloakAuthClient:
         await self._admin.delete_user(user_id)
 
     async def _post_token(self, payload: dict[str, str], *, operation: str) -> dict[str, Any]:
-        start = datetime.now(UTC)
-        status = "success"
+        datetime.now(UTC)
         try:
             async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
                 response = await client.post(settings.keycloak.token_endpoint, data=payload)
                 response.raise_for_status()
                 return dict(response.json())
         except httpx.HTTPStatusError as exc:
-            status = "error"
-            if payload.get("grant_type") == "refresh_token":
-                AUTH_REFRESH_FAILURE_TOTAL.labels(reason=str(exc.response.status_code)).inc()
-            KEYCLOAK_FAILURES_TOTAL.labels(operation=operation).inc()
             raise _authentication_error_from_token_response(
                 exc,
                 grant_type=str(payload.get("grant_type", "")),
             ) from exc
         except httpx.HTTPError as exc:
-            status = "error"
-            if payload.get("grant_type") == "refresh_token":
-                AUTH_REFRESH_FAILURE_TOTAL.labels(reason=type(exc).__name__).inc()
-            KEYCLOAK_FAILURES_TOTAL.labels(operation=operation).inc()
             raise KeycloakIntegrationError("Keycloak token endpoint unavailable") from exc
-        finally:
-            elapsed = (datetime.now(UTC) - start).total_seconds()
-            KEYCLOAK_REQUEST_DURATION_SECONDS.labels(operation=operation).observe(elapsed)
-            KEYCLOAK_REQUESTS_TOTAL.labels(operation=operation, status=status).inc()
 
 
 def _authentication_error_from_token_response(

@@ -85,7 +85,6 @@ class MatrixSessionResponse(BaseModel):
 
     enabled: bool = True
     homeserver_url: str | None = None
-    sliding_sync_url: str | None = None
     access_token: str | None = None
     user_id: str | None = None
     matrix_user_id: str | None = None

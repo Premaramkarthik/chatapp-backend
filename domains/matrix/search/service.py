@@ -10,7 +10,6 @@ from infrastructure.database.repositories.conversations import PostgresConversat
 from infrastructure.database.repositories.matrix_attachments import (
     PostgresMatrixAttachmentRepository,
 )
-from infrastructure.matrix.client import search_messages as matrix_search_messages
 
 
 class MatrixSearchService:
@@ -36,14 +35,9 @@ class MatrixSearchService:
         limit: int = 20,
     ) -> list[dict[str, Any]]:
         """Search messages via Synapse for the authenticated user."""
-        session = await self._sessions.create_session(user=user)
-        return await matrix_search_messages(
-            access_token=session["access_token"],
-            mxid=session["matrix_user_id"],
-            search_term=search_term,
-            room_id=room_id,
-            limit=limit,
-        )
+        from fastapi import HTTPException
+
+        raise HTTPException(410, detail={"code": "matrix_client_search_required"})
 
     async def search_rooms(
         self,
@@ -79,11 +73,16 @@ class MatrixSearchService:
     async def search_attachments(
         self,
         *,
+        user_id: str,
         room_id: str | None = None,
         mimetype: str | None = None,
     ) -> list[dict[str, Any]]:
         """Search locally stored attachment metadata."""
-        return await self._attachments.search(room_id=room_id, mimetype=mimetype)
+        from domains.matrix.authorization import require_room_access
+
+        if room_id:
+            await require_room_access(user_id, room_id)
+        return await self._attachments.search(user_id=user_id, room_id=room_id, mimetype=mimetype)
 
     async def record_attachment_metadata(
         self,
@@ -97,6 +96,9 @@ class MatrixSearchService:
         thumbnail_event_id: str | None = None,
     ) -> dict[str, Any]:
         """Persist attachment metadata after client upload."""
+        from domains.matrix.authorization import require_room_access
+
+        await require_room_access(uploaded_by_user_id, room_id)
         return await self._attachments.upsert(
             room_id=room_id,
             event_id=event_id,
@@ -156,11 +158,12 @@ class MatrixSearchService:
     async def search_attachments_envelope(
         self,
         *,
+        user_id: str,
         room_id: str | None = None,
         mimetype: str | None = None,
     ) -> dict[str, Any]:
         """Search attachment metadata and return a response envelope."""
-        items = await self.search_attachments(room_id=room_id, mimetype=mimetype)
+        items = await self.search_attachments(user_id=user_id, room_id=room_id, mimetype=mimetype)
         return {
             "items": items,
             "search_scope": "attachments",

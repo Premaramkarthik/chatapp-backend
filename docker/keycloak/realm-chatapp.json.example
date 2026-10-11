@@ -2,7 +2,7 @@
   "realm": "chatapp",
   "enabled": true,
   "emailTheme": "paripath",
-  "registrationAllowed": false,
+  "registrationAllowed": true,
   "resetPasswordAllowed": true,
   "rememberMe": true,
   "verifyEmail": true,
@@ -97,25 +97,13 @@
       "name": "chatapp-web",
       "enabled": true,
       "protocol": "openid-connect",
-      "publicClient": true,
+      "publicClient": false,
       "standardFlowEnabled": true,
       "implicitFlowEnabled": false,
-      "directAccessGrantsEnabled": true,
+      "directAccessGrantsEnabled": false,
       "serviceAccountsEnabled": false,
       "redirectUris": [
-        "http://localhost:8000/v1/auth/signin/callback",
-        "http://localhost:8080/auth/callback",
-        "http://localhost:8080/verify-email/complete",
-        "http://127.0.0.1:8080/auth/callback",
-        "http://127.0.0.1:8080/verify-email/complete",
-        "http://localhost:5173/auth/callback",
-        "http://localhost:5173/verify-email/complete",
-        "http://127.0.0.1:5173/auth/callback",
-        "http://127.0.0.1:5173/verify-email/complete",
-        "http://localhost:5173/home/auth/callback",
-        "http://127.0.0.1:5173/home/auth/callback",
-        "http://localhost:5173/home/verify-email/complete",
-        "http://127.0.0.1:5173/home/verify-email/complete"
+        "http://localhost:8000/v1/auth/signin/callback"
       ],
       "webOrigins": [
         "http://localhost:5173",
@@ -125,7 +113,7 @@
       ],
       "attributes": {
         "pkce.code.challenge.method": "S256",
-        "post.logout.redirect.uris": "http://localhost:8080/* http://127.0.0.1:8080/* http://localhost:5173/* http://127.0.0.1:5173/*"
+        "post.logout.redirect.uris": "http://localhost:8080/ http://localhost:3000/"
       },
       "protocolMappers": [
         {
@@ -153,7 +141,8 @@
             "userinfo.token.claim": "true"
           }
         }
-      ]
+      ],
+      "secret": "${KEYCLOAK_WEB_CLIENT_SECRET}"
     },
     {
       "clientId": "chatapp-api",
@@ -165,7 +154,8 @@
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": false
+      "serviceAccountsEnabled": false,
+      "protocolMappers": []
     },
     {
       "clientId": "chatapp-backend-admin",
@@ -173,12 +163,34 @@
       "enabled": true,
       "protocol": "openid-connect",
       "clientAuthenticatorType": "client-secret",
-      "secret": "change-me",
+      "secret": "${KEYCLOAK_ADMIN_CLIENT_SECRET}",
       "publicClient": false,
       "standardFlowEnabled": false,
       "implicitFlowEnabled": false,
       "directAccessGrantsEnabled": false,
-      "serviceAccountsEnabled": true
+      "serviceAccountsEnabled": true,
+      "protocolMappers": []
+    },
+    {
+      "clientId": "paripath-matrix",
+      "name": "PariPath Matrix",
+      "enabled": true,
+      "protocol": "openid-connect",
+      "publicClient": false,
+      "secret": "dev-matrix-oidc-change-me",
+      "standardFlowEnabled": true,
+      "directAccessGrantsEnabled": false,
+      "serviceAccountsEnabled": false,
+      "redirectUris": [
+        "http://localhost:8008/_synapse/client/oidc/callback"
+      ],
+      "webOrigins": [],
+      "defaultClientScopes": [
+        "profile"
+      ],
+      "attributes": {
+        "oauth2.device.authorization.grant.enabled": "false"
+      }
     }
   ],
   "users": [
@@ -199,5 +211,79 @@
       }
     }
   ],
-  "identityProviders": []
+  "identityProviders": [],
+  "loginTheme": "paripath",
+  "eventsEnabled": true,
+  "eventsListeners": [
+    "jboss-logging"
+  ],
+  "adminEventsEnabled": true,
+  "adminEventsDetailsEnabled": false,
+  "defaultRole": {
+    "name": "default-roles-chatapp",
+    "composite": true,
+    "composites": {
+      "client": {
+        "chatapp-api": [
+          "profile:update",
+          "session:manage",
+          "message:send",
+          "message:create-room",
+          "trip:create",
+          "trip:update",
+          "trip:join"
+        ]
+      }
+    }
+  },
+  "browserFlow": "paripath-browser",
+  "authenticationFlows": [
+    {
+      "alias": "paripath-browser",
+      "description": "Version-bound browser authentication",
+      "providerId": "basic-flow",
+      "topLevel": true,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-cookie",
+          "requirement": "ALTERNATIVE",
+          "priority": 10,
+          "authenticatorFlow": false
+        },
+        {
+          "authenticator": "identity-provider-redirector",
+          "requirement": "ALTERNATIVE",
+          "priority": 20,
+          "authenticatorFlow": false
+        },
+        {
+          "flowAlias": "paripath-forms",
+          "requirement": "ALTERNATIVE",
+          "priority": 30,
+          "authenticatorFlow": true
+        }
+      ]
+    },
+    {
+      "alias": "paripath-forms",
+      "providerId": "basic-flow",
+      "topLevel": false,
+      "builtIn": false,
+      "authenticationExecutions": [
+        {
+          "authenticator": "auth-username-password-form",
+          "requirement": "REQUIRED",
+          "priority": 10,
+          "authenticatorFlow": false
+        },
+        {
+          "authenticator": "auth-otp-form",
+          "requirement": "OPTIONAL",
+          "priority": 20,
+          "authenticatorFlow": false
+        }
+      ]
+    }
+  ]
 }

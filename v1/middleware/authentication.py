@@ -35,6 +35,15 @@ class JWTAuthenticationMiddleware:
         self.public_prefixes = public_prefixes
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        # These routes prove opaque-cookie ownership in their dependency. They only
+        # remove access and must remain usable during a provider outage.
+        path = scope.get("path", "")
+        if scope.get("type") == "http" and (
+            (scope.get("method") == "POST" and path == "/v1/auth/logout")
+            or (scope.get("method") == "DELETE" and path.startswith("/v1/auth/sessions/"))
+        ):
+            await self.app(scope, receive, send)
+            return
         if scope["type"] != "http" or not self._requires_auth(scope["path"]):
             await self.app(scope, receive, send)
             return
@@ -72,8 +81,15 @@ class JWTAuthenticationMiddleware:
             )
 
         principal = await keycloak_verifier.verify_token(token)
+        from infrastructure.database.repositories.users import PostgresUserRepository
+        from infrastructure.keycloak.session_control import session_control
+
+        await session_control.check(principal)
+        user = await PostgresUserRepository().get_by_keycloak_sub(principal.sub)
+        if user is None or user.status not in {"active", "pending_profile_setup"}:
+            raise HTTPException(401, detail="Account is disabled or not provisioned")
         ensure_state(scope)[PRINCIPAL_STATE_KEY] = principal
-        bind_request_context(user_id=principal.sub, keycloak_sub=principal.sub)
+        bind_request_context(user_id=user.id, keycloak_sub=principal.sub)
         await self.app(scope, receive, send)
 
     async def _authenticate_session_cookie(
@@ -100,6 +116,8 @@ class JWTAuthenticationMiddleware:
 
     def _requires_auth(self, path: str) -> bool:
         if not settings.middleware.auth_enabled:
+            return False
+        if path == "/v1/auth/internal/credential-events":
             return False
         if path in self.public_paths:
             return False

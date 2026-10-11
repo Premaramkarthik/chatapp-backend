@@ -1,0 +1,12 @@
+{
+  "redis:7-alpine": "redis:7-alpine@sha256:858f009f9709ce576febc734aa78b8f6d624b82571f9ddb6bda4377c833b3499",
+  "matrixdotorg/synapse:latest": "matrixdotorg/synapse:latest@sha256:abeb932f2a9293fcbb886d5ddd0f55a34d532708ebb8dc5642934dd91ca26237",
+  "typesense/typesense:30.2": "typesense/typesense:30.2@sha256:610f2d34b1f93d00762869da2c67736775e5798d19a2c8b91b014b8a0cc1e110",
+  "nginx:1.27-alpine": "nginx:1.27-alpine@sha256:65645c7bb6a0661892a8b03b89d0743208a18dd2f3f17a54ef4b76fb8e2f2a10",
+  "dpage/pgadmin4:8": "dpage/pgadmin4:8@sha256:8a68677a97b8c8d1427dc915672a26d2c4a04376916a68256f53d669d6171be7",
+  "adminer:4": "adminer:4@sha256:c1c24d89d06fcb8fc0fb5a049240dc292ff4a121ae05d7e74d64b58c421d2921",
+  "redis/redisinsight:latest": "redis/redisinsight:latest@sha256:b5e19ee240abef6edb435871b90ff8a210995422e8e018ab61c0339d318a1f84",
+  "ghcr.io/astral-sh/uv:python3.13-bookworm": "ghcr.io/astral-sh/uv:python3.13-bookworm@sha256:47965cdc9d53a515f68f78241161c901e70051ce428f12e791bd7fe19f6a631a",
+  "postgres:17-alpine": "postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24",
+  "quay.io/keycloak/keycloak:26.0.8": "quay.io/keycloak/keycloak:26.0.8@sha256:09a381c715ab0b111835b70f2905955274843a219c6f27efb348e4d9f4086858"
+}

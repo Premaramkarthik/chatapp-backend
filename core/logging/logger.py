@@ -37,6 +37,8 @@ def setup_logger(
 
     logger.add(
         sys.stderr,
+        diagnose=False,
+        backtrace=False,
         format=LOG_FORMAT,
         level=level,
         colorize=True,
@@ -45,14 +47,14 @@ def setup_logger(
 
     logger.add(
         log_file,
+        diagnose=False,
+        backtrace=False,
         rotation="100 MB",
         retention="30 days",
         level=level,
         format=LOG_FORMAT,
         encoding="utf-8",
         mode="a",
-        backtrace=True,
-        diagnose=True,
         serialize=False,
     )
 

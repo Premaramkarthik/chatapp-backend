@@ -218,3 +218,5 @@ __marimo__/
 check.md
 .vscode
 .cursor
+.codegraph/
+.codex/

@@ -575,28 +575,6 @@ Also requires `REDIS_URL` / `REDIS_ENABLED` for caching and Dramatiq.
 
 ---
 
-## Observability
-
-Metrics in [`core/observability/prometheus_metrics.py`](../core/observability/prometheus_metrics.py), exposed at `GET /metrics`:
-
-| Metric | Type | Labels |
-|--------|------|--------|
-| `search_requests_total` | Counter | `endpoint`, `outcome` |
-| `search_cache_hits_total` | Counter | `endpoint` |
-| `search_cache_misses_total` | Counter | `endpoint` |
-| `search_typesense_latency_seconds` | Histogram | `endpoint` |
-| `search_index_jobs_total` | Counter | `collection`, `action`, `outcome` |
-| `search_reindex_duration_seconds` | Histogram | `collection` |
-| `search_events_recorded_total` | Counter | `type` |
-| `search_analytics_job_duration_seconds` | Histogram | — |
-| `background_job_runs_total` | Counter | `job=search_outbox_poller` |
-
-**Readiness:** `GET /health/ready` checks Typesense `/health` when `TYPESENSE_ENABLED=true`.
-
-**Latency targets:** autocomplete P95 < 100ms, global P95 < 200ms (with cache).
-
----
-
 ## Frontend Integration (connect-carry)
 
 ### Files
@@ -676,7 +654,7 @@ workers/
 v1/routers/search.py
 v1/schemas/search.py
 scripts/rebuild_search_index.py
-migrations/010_search_events.sql
+migrations/012_search_events.sql
 tests/test_search_platform.py
 ```
 

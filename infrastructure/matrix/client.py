@@ -6,15 +6,13 @@ import hashlib
 import json
 import time
 from typing import Any
+from urllib.parse import quote
+from uuid import uuid4
 
 import httpx
 
 from core.config.settings import settings
 from core.logging.logger import get_logger, log_warning
-from core.observability.prometheus_metrics import (
-    MATRIX_CLIENT_DURATION_SECONDS,
-    MATRIX_CLIENT_REQUESTS_TOTAL,
-)
 from v1.utils.base import MatrixIntegrationError
 
 logger = get_logger(__name__)
@@ -42,9 +40,10 @@ async def create_direct_encrypted_room(
         ],
     }
     if room_alias:
-        body["name"] = room_alias
+        body["room_alias_name"] = room_alias.removeprefix("#").split(":", 1)[0]
+        body["visibility"] = "private"
 
-    started = time.perf_counter()
+    time.perf_counter()
     try:
         async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
             response = await client.post(
@@ -53,25 +52,19 @@ async def create_direct_encrypted_room(
                 json=body,
             )
             if response.status_code not in {200, 201}:
-                MATRIX_CLIENT_REQUESTS_TOTAL.labels(operation="room_create", status="failed").inc()
                 raise MatrixIntegrationError(
                     "Matrix room creation failed",
-                    context={"status_code": response.status_code, "body": response.text[:200]},
+                    context={"status_code": response.status_code},
                 )
             payload = response.json()
             room_id = payload.get("room_id")
             if not room_id:
                 raise MatrixIntegrationError("Matrix room creation failed: missing room_id")
-            MATRIX_CLIENT_REQUESTS_TOTAL.labels(operation="room_create", status="success").inc()
             return str(room_id)
     except MatrixIntegrationError:
         raise
     except Exception as exc:
-        MATRIX_CLIENT_REQUESTS_TOTAL.labels(operation="room_create", status="error").inc()
         raise MatrixIntegrationError("Matrix room creation failed") from exc
-    finally:
-        duration = time.perf_counter() - started
-        MATRIX_CLIENT_DURATION_SECONDS.labels(operation="room_create").observe(duration)
 
 
 async def send_room_event(
@@ -81,17 +74,15 @@ async def send_room_event(
     room_id: str,
     event_type: str,
     content: dict[str, Any],
+    transaction_id: str | None = None,
 ) -> str:
     """Send a custom room event and return the event id."""
-    txn_id = hashlib.sha256(
-        json.dumps(
-            {"room_id": room_id, "event_type": event_type, "content": content},
-            sort_keys=True,
-        ).encode("utf-8")
-    ).hexdigest()[:16]
+    if event_type != "m.room.encrypted":
+        raise MatrixIntegrationError("Server plaintext room events are retired")
+    txn_id = transaction_id or uuid4().hex
     url = (
         f"{settings.matrix.homeserver_url.rstrip('/')}/_matrix/client/v3/rooms/"
-        f"{room_id}/send/{event_type}/{txn_id}"
+        f"{quote(room_id, safe='')}/send/{quote(event_type, safe='')}/{quote(txn_id, safe='')}"
     )
     try:
         async with httpx.AsyncClient(timeout=settings.http.timeout_seconds) as client:
@@ -101,7 +92,6 @@ async def send_room_event(
                 json=content,
             )
             if response.status_code not in {200, 201}:
-                MATRIX_CLIENT_REQUESTS_TOTAL.labels(operation="room_send", status="failed").inc()
                 raise MatrixIntegrationError(
                     "Matrix event publish failed",
                     context={"room_id": room_id, "event_type": event_type},
@@ -110,12 +100,10 @@ async def send_room_event(
             event_id = payload.get("event_id")
             if not event_id:
                 raise MatrixIntegrationError("Matrix event publish failed: missing event_id")
-            MATRIX_CLIENT_REQUESTS_TOTAL.labels(operation="room_send", status="success").inc()
             return str(event_id)
     except MatrixIntegrationError:
         raise
     except Exception as exc:
-        MATRIX_CLIENT_REQUESTS_TOTAL.labels(operation="room_send", status="error").inc()
         raise MatrixIntegrationError("Matrix event publish failed") from exc
 
 
@@ -167,3 +155,35 @@ def payload_hash(payload: dict[str, Any]) -> str:
     """Return a stable hash for business event deduplication."""
     normalized = json.dumps(payload, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(normalized.encode("utf-8")).hexdigest()
+
+
+async def reconcile_encrypted_room(
+    *, access_token: str, room_alias: str, expected_members: set[str]
+) -> str | None:
+    """Adopt an existing deterministic alias only after verifying its encryption and members."""
+    base = settings.matrix.homeserver_url.rstrip("/") + "/_matrix/client/v3"
+    async with httpx.AsyncClient(
+        timeout=settings.http.timeout_seconds, headers={"Authorization": f"Bearer {access_token}"}
+    ) as http:
+        response = await http.get(f'{base}/directory/room/{quote(room_alias, safe="")}')
+        if response.status_code == 404:
+            return None
+        response.raise_for_status()
+        room_id = response.json()["room_id"]
+        state = await http.get(f'{base}/rooms/{quote(room_id, safe="")}/state')
+        state.raise_for_status()
+        events = state.json()
+        encryption = next(
+            (e["content"].get("algorithm") for e in events if e["type"] == "m.room.encryption"),
+            None,
+        )
+        members = {
+            e["state_key"]: e["content"].get("membership")
+            for e in events
+            if e["type"] == "m.room.member" and e["content"].get("membership") in {"join", "invite"}
+        }
+        if encryption != "m.megolm.v1.aes-sha2" or set(members) != expected_members:
+            raise MatrixIntegrationError(
+                "Existing room does not match authorized participants and encryption"
+            )
+        return room_id

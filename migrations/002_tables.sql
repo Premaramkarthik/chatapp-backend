@@ -49,6 +49,11 @@ CREATE TABLE IF NOT EXISTS auth_sessions (
     user_id UUID NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     keycloak_sub TEXT NOT NULL,
     status TEXT NOT NULL DEFAULT 'ACTIVE',
+    keycloak_session_id TEXT NOT NULL,
+    authenticated_at TIMESTAMPTZ NOT NULL,
+    token_version BIGINT NOT NULL DEFAULT 0,
+    refresh_owner UUID,
+    refresh_lease_until TIMESTAMPTZ,
     access_token_encrypted TEXT NOT NULL,
     refresh_token_encrypted TEXT,
     id_token_encrypted TEXT,
@@ -639,3 +644,17 @@ BEGIN
     END IF;
 END;
 $$;
+
+-- Durable security operations are independent of user deletion.
+CREATE TABLE IF NOT EXISTS auth_remote_operations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    payload JSONB NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending', 'complete')),
+    attempts INT NOT NULL DEFAULT 0,
+    next_attempt_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    last_error TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    completed_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS auth_remote_operations_pending
+    ON auth_remote_operations(next_attempt_at) WHERE status = 'pending';
