@@ -4,9 +4,9 @@ import json
 from pathlib import Path
 
 r = Path(__file__).resolve().parents[1]
-d = Path("/tmp/paripath-matrix-integration")
+d = Path("/tmp/veliqone-matrix-integration")
 d.mkdir(exist_ok=True)
-realm = json.loads((r / "docker/keycloak/realm-chatapp.json.example").read_text())
+realm = json.loads((r / "deployment/keycloak/realm-chatapp.json.example").read_text())
 realm["realm"] = "matrix-test"
 realm["sslRequired"] = "none"
 realm["users"] = realm.get("users", [])
@@ -28,7 +28,7 @@ for c in realm["clients"]:
     if c["clientId"] == "chatapp-web":
         c["redirectUris"] = ["http://localhost:18000/v1/auth/signin/callback"]
         c["attributes"]["post.logout.redirect.uris"] = "http://localhost:18030/"
-    if c["clientId"] == "paripath-matrix":
+    if c["clientId"] == "veliqone-matrix":
         c["redirectUris"] = ["http://localhost:18008/_synapse/client/oidc/callback"]
 (d / "realm.json").write_text(json.dumps(realm))
 (d / "synapse.yaml").write_text("""server_name: matrix.test
@@ -55,12 +55,12 @@ rc_login:
   account: {per_second: 100, burst_count: 1000}
 oidc_providers:
 - idp_id: keycloak
-  idp_name: PariPath
+  idp_name: Veliqone
   issuer: http://localhost:18080/realms/matrix-test
   discover: false
   skip_verification: true
   pkce_method: always
-  client_id: paripath-matrix
+  client_id: veliqone-matrix
   client_secret: dev-matrix-oidc-change-me
   authorization_endpoint: http://localhost:18080/realms/matrix-test/protocol/openid-connect/auth
   token_endpoint: http://keycloak:8080/realms/matrix-test/protocol/openid-connect/token
@@ -76,7 +76,7 @@ oidc_providers:
 sso:
   client_whitelist: ["http://localhost:18000/v1/chat/matrix/callback?"]
 """)
-(d / "compose.yaml").write_text("""name: paripath-matrix-integration
+(d / "compose.yaml").write_text("""name: veliqone-matrix-integration
 services:
   postgres:
     image: >-
@@ -88,7 +88,7 @@ services:
     ports: ["127.0.0.1:15439:5432"]
     tmpfs: [/var/lib/postgresql/data]
   keycloak:
-    image: paripath-keycloak:local
+    image: veliqone-keycloak:local
     command: [start-dev, --import-realm]
     environment:
       KC_BOOTSTRAP_ADMIN_USERNAME: test-admin

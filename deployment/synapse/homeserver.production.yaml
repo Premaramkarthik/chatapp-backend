@@ -63,9 +63,9 @@ enable_admin_api: true
 
 oidc_providers:
 - idp_id: keycloak
-  idp_name: PariPath
+  idp_name: Veliqone
   issuer: ${MATRIX_OIDC_ISSUER}
-  client_id: paripath-matrix
+  client_id: veliqone-matrix
   client_secret: ${MATRIX_OIDC_CLIENT_SECRET}
   pkce_method: always
   scopes: [openid, profile]

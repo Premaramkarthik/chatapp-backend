@@ -4,14 +4,14 @@
 
 This is a Python 3.13+ FastAPI backend. `main.py` is the application entrypoint. API routers, schemas, middleware, and dependencies live in `v1/`; business logic lives in `domains/`. External service clients and database repositories belong in `infrastructure/`, while shared configuration, logging, and observability live in `core/`.
 
-Background jobs live in `workers/`. SQL migrations belong in `migrations/`; operational scripts in `scripts/`; tests in `tests/`. Use `docker/` for service configuration and assets, and `docs/` for architecture and operational documentation.
+Background jobs live in `workers/`. SQL migrations belong in `migrations/`; operational scripts in `scripts/`; tests in `tests/`. Use `deployment/` for service configuration and assets, and `docs/` for architecture and operational documentation.
 
 ## Build, Test, and Development Commands
 
 Prefix shell commands with `rtk`, per `/home/zayn/.codex/RTK.md`. Use `rtk proxy` when a command needs unfiltered execution.
 
 - `rtk proxy uv sync --extra dev`: install application and development dependencies.
-- `rtk proxy docker compose up -d`: start local infrastructure.
+- `rtk proxy docker compose up -d`: start the configured Compose stack; production PostgreSQL is external and must be provisioned first.
 - `rtk proxy uv run python scripts/run_migrations.py`: apply pending SQL migrations.
 - `rtk proxy uv run uvicorn main:app --reload`: start the development API.
 - `rtk proxy uv run pytest -m "not integration and not e2e"`: run tests without external integration suites.

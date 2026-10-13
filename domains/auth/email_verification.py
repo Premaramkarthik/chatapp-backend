@@ -48,7 +48,7 @@ class SmtpVerificationEmailSender:
             )
 
         email = EmailMessage()
-        email["Subject"] = "Verify your PariPath email"
+        email["Subject"] = "Verify your Veliqone email"
         email["From"] = _from_header()
         email["To"] = message.to_email
         email.set_content(_text_body(message.verify_link))
@@ -147,10 +147,10 @@ def _login_and_send(smtp: smtplib.SMTP, email: EmailMessage) -> None:
 
 def _text_body(link: str) -> str:
     return (
-        "Welcome to PariPath.\n\n"
+        "Welcome to Veliqone.\n\n"
         "Verify your email address to protect your account and finish setup:\n\n"
         f"{link}\n\n"
-        "If you did not create a PariPath account, you can safely ignore this email.\n"
+        "If you did not create a Veliqone account, you can safely ignore this email.\n"
     )
 
 
@@ -161,12 +161,12 @@ def _html_body(link: str) -> str:
   <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:24px;
       border:1px solid #e5e7eb;font-family:Arial,Helvetica,sans-serif;color:#111827;">
     <div style="padding:32px 32px 16px;">
-      <div style="font-size:24px;font-weight:700;letter-spacing:-0.02em;">PariPath</div>
+      <div style="font-size:24px;font-weight:700;letter-spacing:-0.02em;">Veliqone</div>
       <h1 style="margin:28px 0 12px;font-size:30px;line-height:1.15;font-weight:700;">
         Verify your email
       </h1>
       <p style="margin:0;color:#4b5563;font-size:15px;line-height:1.6;">
-        Welcome to PariPath. Confirm this email address so we can protect your account
+        Welcome to Veliqone. Confirm this email address so we can protect your account
         and finish your setup.
       </p>
     </div>
@@ -179,7 +179,7 @@ def _html_body(link: str) -> str:
     </div>
     <div style="padding:16px 32px 32px;">
       <p style="margin:0;color:#6b7280;font-size:13px;line-height:1.6;">
-        This link expires soon. If you did not create a PariPath account,
+        This link expires soon. If you did not create a Veliqone account,
         you can safely ignore this email.
       </p>
       <p style="margin:18px 0 0;color:#9ca3af;font-size:12px;line-height:1.5;

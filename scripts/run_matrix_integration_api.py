@@ -49,7 +49,7 @@ os.environ.update(
         "MATRIX_SERVICE_ADMIN_PASSWORD": "matrix-test-service-admin-password",
         "MATRIX_CALLBACK_URL": "http://localhost:18000/v1/chat/matrix/callback",
         "MATRIX_POST_LOGIN_URL": "http://localhost:18030/chat",
-        "LOGGING_FILE": "/tmp/paripath-matrix-integration/api.log",
+        "LOGGING_FILE": "/tmp/veliqone-matrix-integration/api.log",
     }
 )
 import httpx

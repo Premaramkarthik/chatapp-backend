@@ -1,6 +1,6 @@
 # Typesense Search Platform — End-to-End Guide
 
-This document describes the complete **Typesense-backed search platform** for PariPath: architecture, database schema, indexing pipeline, API, caching, Docker, frontend integration, observability, and operational runbooks.
+This document describes the complete **Typesense-backed search platform** for Veliqone: architecture, database schema, indexing pipeline, API, caching, Docker, frontend integration, observability, and operational runbooks.
 
 **Source code roots:**
 
@@ -20,7 +20,7 @@ This document describes the complete **Typesense-backed search platform** for Pa
 
 ## Overview
 
-PariPath search is **Typesense-only on the hot path**. API routes never write to Typesense synchronously. Instead:
+Veliqone search is **Typesense-only on the hot path**. API routes never write to Typesense synchronously. Instead:
 
 1. **PostgreSQL** is the source of truth for profiles, discovery snapshots, and geo data.
 2. Profile/trip/privacy writes enqueue **`search_outbox_events`**.
@@ -531,7 +531,9 @@ healthcheck: wget http://127.0.0.1:8108/health
 
 ### `search-worker`
 
-Depends on: `postgres`, `redis`, `typesense` (all healthy).
+The worker is run separately from the production Compose stack. Configure its database
+endpoint to use PgBouncer (`PGBOUNCER_HOST=pgbouncer` in a container or `localhost`
+when run on the host), and point Redis and Typesense at their service endpoints.
 
 ```bash
 uv run dramatiq workers.search_tasks --processes 1 --threads 2 &
@@ -662,7 +664,8 @@ tests/test_search_platform.py
 
 ## Local Development Checklist
 
-1. Start stack: `docker compose up -d postgres redis typesense search-worker`
+1. Configure the external PostgreSQL server and required secrets, then start services with `docker compose up -d`.
+   The production Compose file does not provision PostgreSQL or a search worker.
 2. Apply migrations: `uv run python scripts/run_migrations.py`
 3. Sync geo (if needed): `uv run python scripts/sync_geo_from_csc.py`
 4. Bootstrap indexes: `uv run python scripts/rebuild_search_index.py --collection all`

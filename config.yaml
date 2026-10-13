@@ -1,6 +1,7 @@
+# Non-sensitive application defaults. .env and process environment override these values.
 app:
   name: chatapp API
-  environment: local
+  environment: "local"
   version: "0.1.0"
   debug: true
   skip_startup_integrations: false
@@ -12,19 +13,18 @@ logging:
 observability:
   enabled: true
   service_name: chatapp-backend
-  otlp_endpoint: http://localhost:4317
   otlp_insecure: true
   traces_sample_rate: 1.0
   metrics_enabled: true
-  correlation_header: X-Correlation-ID
+  correlation_header: "X-Correlation-ID"
 
 http:
   timeout_seconds: 30
   retry_attempts: 3
 
 jwt:
-  audience: chatapp-api
-  algorithms: RS256
+  audience: "chatapp-api"
+  algorithms: "RS256"
   jwks_cache_ttl: 300
   jwks_refresh_interval_sec: 240
   stale_jwks_ttl_sec: 900
@@ -33,14 +33,11 @@ jwt:
 keycloak:
   enabled: true
   auto_bootstrap: true
-  base_url: http://localhost:8180
-  public_base_url: http://localhost:8180
-  internal_base_url: http://localhost:8180
-  issuer_url: http://localhost:8180/realms/chatapp
   realm: chatapp
   web_client_id: chatapp-web
   admin_client_id: chatapp-backend-admin
-  google_idp_alias: google
+  google_idp_alias: "google"
+  google_idp_hide_on_login_page: true
 
 redis:
   enabled: true
@@ -55,31 +52,103 @@ database:
   name: chatapp
   pool_min: 1
   pool_max: 10
+  target: "direct"
+  pool_auto: true
+  pool_auto_concurrent_requests: 16
+  pool_auto_ceiling: 10
 
 middleware:
   rate_limit_enabled: true
   rate_limit_requests: 120
   rate_limit_window_sec: 60
+  cors_enabled: true
+  cors_allow_credentials: true
+  cors_allow_methods: "*"
+  cors_allow_headers: "*"
+  request_id_header: "X-Request-ID"
+  auth_enabled: true
+  db_session_enabled: true
+  log_request_body: false
+  csrf_enabled: true
+  security_headers_enabled: true
+  content_security_policy: "default-src 'self'; frame-ancestors 'none'; base-uri 'self'"
+  docs_content_security_policy: "default-src 'self'; script-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; style-src 'self' 'unsafe-inline' https://cdn.jsdelivr.net; img-src 'self' data: https://fastapi.tiangolo.com; font-src 'self' data: https://cdn.jsdelivr.net; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'"
 
 auth:
-  callback_url: http://localhost:8000/v1/auth/signin/callback
-  default_post_signin_redirect_url: http://localhost:8080/auth/callback
-  post_logout_redirect_url: http://localhost:8080/
-  allowed_redirect_origins:
-    - http://localhost:3000
-    - http://localhost:5173
-    - http://localhost:8080
-    - http://127.0.0.1:3000
-    - http://127.0.0.1:5173
-    - http://127.0.0.1:8080
-  email_verify_redirect_url: http://localhost:8080/verify-email/complete
-  password_reset_redirect_url: http://localhost:8080/reset-password
   reset_email_lifespan_sec: 900
   email_verification_token_ttl_sec: 900
   session_idle_sec: 1800
   session_max_sec: 43200
   remember_me_session_max_sec: 2592000
   signup_min_password_length: 12
-  default_signup_roles: profile:update,session:manage,message:send,message:create-room,trip:create,trip:update,trip:join
-  verification_reconcile_enabled: true
+  default_signup_roles:
+    - "profile:update"
+    - "session:manage"
+    - "message:send"
+    - "message:create-room"
+    - "trip:create"
+    - "trip:update"
+    - "trip:join"
+  verification_reconcile_enabled: false
   signup_resend_cooldown_sec: 60
+  cookie_name: "pp_session"
+  csrf_cookie_name: "pp_csrf"
+  csrf_header_name: "X-CSRF-Token"
+  cookie_domain: ""
+  cookie_secure: false
+  cookie_samesite: "lax"
+  signin_state_ttl_sec: 600
+  refresh_leeway_sec: 60
+  session_cache_ttl_sec: 300
+  revoke_cache_ttl_sec: 43200
+  captcha_required: false
+  signup_idempotency_ttl_sec: 86400
+  signup_ip_limit: 5
+  signup_ip_window_sec: 60
+  signup_device_limit: 5
+  signup_device_window_sec: 60
+  signup_domain_limit: 20
+  signup_domain_window_sec: 3600
+  signup_resend_email_limit: 3
+  signup_resend_email_window_sec: 900
+  signup_social_ip_limit: 10
+  signup_social_ip_window_sec: 60
+  signup_max_verification_sends: 5
+  signup_session_ttl_sec: 1800
+  verification_reconcile_interval_sec: 300
+  verification_reconcile_batch_size: 50
+  signup_max_password_length: 128
+  blocked_email_domains:
+    - "tempmail.com"
+    - "guerrillamail.com"
+    - "10minutemail.com"
+
+matrix:
+  access_token_ttl_sec: 3600
+  session_cache_ttl_sec: 300
+  image_max_bytes: 10485760
+  document_max_bytes: 26214400
+  video_max_bytes: 104857600
+  message_rate_limit: 60
+  message_rate_window_sec: 60
+  media_rate_limit: 20
+  media_rate_window_sec: 60
+
+typesense:
+  enabled: true
+  users_collection: "users"
+  travelers_collection: "travelers"
+  cities_collection: "cities"
+  countries_collection: "countries"
+  states_collection: "states"
+  user_recommendations_collection: "user_recommendations"
+  popular_searches_collection: "popular_searches"
+
+search:
+  cache_ttl_city_sec: 86400
+  cache_ttl_country_sec: 86400
+  cache_ttl_state_sec: 86400
+  cache_ttl_user_sec: 300
+  cache_ttl_traveler_sec: 120
+  cache_ttl_global_sec: 300
+  cache_ttl_recent_sec: 604800

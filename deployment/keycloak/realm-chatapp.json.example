@@ -1,7 +1,7 @@
 {
   "realm": "chatapp",
   "enabled": true,
-  "emailTheme": "paripath",
+  "emailTheme": "veliqone",
   "registrationAllowed": true,
   "resetPasswordAllowed": true,
   "rememberMe": true,
@@ -172,8 +172,8 @@
       "protocolMappers": []
     },
     {
-      "clientId": "paripath-matrix",
-      "name": "PariPath Matrix",
+      "clientId": "veliqone-matrix",
+      "name": "Veliqone Matrix",
       "enabled": true,
       "protocol": "openid-connect",
       "publicClient": false,
@@ -212,7 +212,7 @@
     }
   ],
   "identityProviders": [],
-  "loginTheme": "paripath",
+  "loginTheme": "veliqone",
   "eventsEnabled": true,
   "eventsListeners": [
     "jboss-logging"
@@ -236,10 +236,10 @@
       }
     }
   },
-  "browserFlow": "paripath-browser",
+  "browserFlow": "veliqone-browser",
   "authenticationFlows": [
     {
-      "alias": "paripath-browser",
+      "alias": "veliqone-browser",
       "description": "Version-bound browser authentication",
       "providerId": "basic-flow",
       "topLevel": true,
@@ -258,7 +258,7 @@
           "authenticatorFlow": false
         },
         {
-          "flowAlias": "paripath-forms",
+          "flowAlias": "veliqone-forms",
           "requirement": "ALTERNATIVE",
           "priority": 30,
           "authenticatorFlow": true
@@ -266,7 +266,7 @@
       ]
     },
     {
-      "alias": "paripath-forms",
+      "alias": "veliqone-forms",
       "providerId": "basic-flow",
       "topLevel": false,
       "builtIn": false,

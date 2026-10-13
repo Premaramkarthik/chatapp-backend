@@ -1,8 +1,9 @@
 """Application settings loaded from config.yaml, environment variables, and .env."""
 
 from pathlib import Path
+from typing import Literal
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from core.config.loader import apply_yaml_defaults_to_env, validate_production_settings
@@ -183,7 +184,9 @@ class DatabaseSettings(EnvSettings):
     user: str = Field("postgres", alias="DB_USER")
     password: SecretStr = Field(SecretStr("postgres"), alias="DB_PASSWORD")
     name: str = Field("chatapp", alias="DB_NAME")
-    target_label: str = Field("", alias="DB_TARGET")
+    target_label: Literal["direct", "pgbouncer"] = Field("direct", alias="DB_TARGET")
+    pgbouncer_host: str = Field("localhost", alias="PGBOUNCER_HOST")
+    pgbouncer_port: int = Field(6432, alias="PGBOUNCER_PORT")
     pool_min: int = Field(1, alias="DB_POOL_MIN")
     pool_max: int | None = Field(None, alias="DB_POOL_MAX")
     pool_auto: bool = Field(True, alias="DB_POOL_AUTO")
@@ -202,7 +205,24 @@ class DatabaseSettings(EnvSettings):
     @property
     def dsn(self) -> str:
         """Return a libpq-style DSN safe for asyncpg.connect/create_pool."""
-        return f"postgresql://{self.user}:{self.password_value}@{self.host}:{self.port}/{self.name}"
+        from urllib.parse import quote
+
+        user = quote(self.user, safe="")
+        password = quote(self.password_value, safe="")
+        database = quote(self.name, safe="")
+        return f"postgresql://{user}:{password}@{self.host}:{self.port}/{database}"
+
+    @property
+    def direct_dsn(self) -> str:
+        """Return the direct PostgreSQL DSN for migrations and administrative scripts."""
+        return self.dsn
+
+    @property
+    def application_host_port(self) -> tuple[str, int]:
+        """Return the selected endpoint for application connections."""
+        if self.target_label == "pgbouncer":
+            return self.pgbouncer_host, self.pgbouncer_port
+        return self.host, self.port
 
 
 class KeycloakSettings(EnvSettings):
@@ -249,7 +269,7 @@ class KeycloakSettings(EnvSettings):
     smtp_port: str = Field("587", alias="KEYCLOAK_SMTP_PORT")
     smtp_from: str = Field("", alias="KEYCLOAK_SMTP_FROM")
     smtp_from_display_name: str = Field(
-        "PariPath ChatApp",
+        "Veliqone ChatApp",
         alias="KEYCLOAK_SMTP_FROM_DISPLAY_NAME",
     )
     smtp_user: str = Field("", alias="KEYCLOAK_SMTP_USER")
@@ -470,10 +490,32 @@ class RedisSettings(EnvSettings):
     """Redis cache and coordination settings."""
 
     enabled: bool = Field(True, alias="REDIS_ENABLED")
-    url: str = Field("redis://localhost:6379/0", alias="REDIS_URL")
+    host: str = Field("localhost", alias="REDIS_HOST")
+    port: int = Field(6379, alias="REDIS_PORT")
+    password: SecretStr = Field(SecretStr(""), alias="REDIS_PASSWORD")
+    url_override: SecretStr | None = Field(None, alias="REDIS_URL")
     cache_ttl_sec: int = Field(3600, alias="REDIS_CACHE_TTL_SEC")
     socket_timeout_sec: float = Field(1.0, alias="REDIS_SOCKET_TIMEOUT_SEC")
     connect_timeout_sec: float = Field(1.0, alias="REDIS_CONNECT_TIMEOUT_SEC")
+
+    @model_validator(mode="after")
+    def require_authentication(self) -> "RedisSettings":
+        """Require a password unless Redis is disabled or an explicit URL is supplied."""
+        has_url_override = bool(self.url_override and self.url_override.get_secret_value())
+        if self.enabled and not self.password.get_secret_value() and not has_url_override:
+            raise ValueError("REDIS_PASSWORD is required when Redis is enabled")
+        return self
+
+    @property
+    def url(self) -> str:
+        """Return an explicit compatibility URL or build one from the Redis settings."""
+        if self.url_override and self.url_override.get_secret_value():
+            return self.url_override.get_secret_value()
+
+        from urllib.parse import quote
+
+        encoded_password = quote(self.password.get_secret_value(), safe="")
+        return f"redis://:{encoded_password}@{self.host}:{self.port}"
 
 
 class MatrixSettings(EnvSettings):
@@ -482,7 +524,7 @@ class MatrixSettings(EnvSettings):
     enabled: bool = Field(True, alias="MATRIX_ENABLED")
     homeserver_url: str = Field("http://localhost:8008", alias="MATRIX_HOMESERVER_URL")
     public_homeserver_url: str = Field("", alias="MATRIX_PUBLIC_HOMESERVER_URL")
-    oidc_client_id: str = Field("paripath-matrix", alias="MATRIX_OIDC_CLIENT_ID")
+    oidc_client_id: str = Field("veliqone-matrix", alias="MATRIX_OIDC_CLIENT_ID")
     oidc_client_secret: SecretStr = Field(
         SecretStr("dev-matrix-oidc-change-me"), alias="MATRIX_OIDC_CLIENT_SECRET"
     )

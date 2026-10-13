@@ -48,7 +48,7 @@ class SmtpPasswordResetEmailSender:
             )
 
         email = EmailMessage()
-        email["Subject"] = "Reset your PariPath password"
+        email["Subject"] = "Reset your Veliqone password"
         email["From"] = _from_header()
         email["To"] = message.to_email
         email.set_content(_text_body(message.reset_link))
@@ -140,7 +140,7 @@ def _login_and_send(smtp: smtplib.SMTP, email: EmailMessage) -> None:
 
 def _text_body(link: str) -> str:
     return (
-        "You requested a password reset for your PariPath account.\n\n"
+        "You requested a password reset for your Veliqone account.\n\n"
         "Choose a new password using the link below:\n\n"
         f"{link}\n\n"
         "If you did not request this reset, you can safely ignore this email.\n"
@@ -154,7 +154,7 @@ def _html_body(link: str) -> str:
   <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:24px;
       border:1px solid #e5e7eb;font-family:Arial,Helvetica,sans-serif;color:#111827;">
     <div style="padding:32px 32px 16px;">
-      <div style="font-size:24px;font-weight:700;letter-spacing:-0.02em;">PariPath</div>
+      <div style="font-size:24px;font-weight:700;letter-spacing:-0.02em;">Veliqone</div>
       <h1 style="margin:28px 0 12px;font-size:30px;line-height:1.15;font-weight:700;">
         Reset your password
       </h1>

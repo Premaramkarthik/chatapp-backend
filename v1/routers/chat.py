@@ -667,8 +667,8 @@ async def publish_business_event(
         raise HTTPException(409, detail={"code": "matrix_room_access_denied"}) from exc
     event_type = (
         payload.event_type
-        if payload.event_type.startswith("com.paripath.")
-        else f"com.paripath.{payload.event_type}"
+        if payload.event_type.startswith("com.veliqone.")
+        else f"com.veliqone.{payload.event_type}"
     )
     content = {"aggregate_id": payload.aggregate_id, **payload.payload}
     try:

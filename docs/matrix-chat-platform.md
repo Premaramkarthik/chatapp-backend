@@ -7,7 +7,7 @@ Application UUIDs, Matrix localparts, and MXIDs remain stable.
 
 ## Identity and login
 
-Configure the confidential `paripath-matrix` Keycloak client with Authorization Code,
+Configure the confidential `veliqone-matrix` Keycloak client with Authorization Code,
 PKCE, and the exact redirect `https://<matrix-host>/_synapse/client/oidc/callback`.
 Direct Access Grants and automatic email-based linking are disabled. Synapse account
 registration through OIDC is disabled: provisioning explicitly binds the verified

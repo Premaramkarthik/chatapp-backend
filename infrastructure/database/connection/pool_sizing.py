@@ -14,10 +14,9 @@ logger = get_logger(__name__)
 # When inference is off or fails, cap max pool size at this value per API process.
 _FALLBACK_MAX_POOL = 4
 
-# In PgBouncer session mode, client sessions generally hold server connections.
-# Avoid accidental stampedes by defaulting to a tiny per-process pool cap when
-# DB_TARGET=pgbouncer unless an explicit DB_POOL_MAX is configured.
-_PGBOUNCER_SESSION_SAFE_MAX_POOL = 1
+# Keep the fallback cap conservative when sizing through PgBouncer without an
+# explicit DB_POOL_MAX. The configured pooler limits server-side concurrency.
+_PGBOUNCER_FALLBACK_MAX_POOL = 4
 
 # Same buffer as infer_api_pool_max_from_server when dividing usable backends by workers.
 _USABLE_BACKENDS_BUFFER = 2
@@ -186,10 +185,10 @@ async def resolve_api_db_pool_min_max(
         return min_size, max_size
 
     if settings.database.target_label == "pgbouncer" and t.auto_infer:
-        max_size = max(min_size, _PGBOUNCER_SESSION_SAFE_MAX_POOL)
+        max_size = max(min_size, _PGBOUNCER_FALLBACK_MAX_POOL)
         log_warning(
             logger,
-            "Using safe default pool size for PgBouncer session mode; set DB_POOL_MAX to override",
+            "Using fallback API pool size for PgBouncer; set DB_POOL_MAX to override",
             max_size=max_size,
         )
         return min_size, max_size

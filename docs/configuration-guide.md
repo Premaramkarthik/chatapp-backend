@@ -22,17 +22,23 @@ Examples:
 
 Lists in YAML become comma-separated env values.
 
-## .env (secrets only)
+## .env (secrets and deployment details)
 
 Keep these in `.env` or your secret manager — **not** in `config.yaml`:
 
-- `DB_PASSWORD`, `REDIS_URL`
+- `DB_PASSWORD`, `REDIS_PASSWORD`
 - `KEYCLOAK_WEB_CLIENT_SECRET`, `KEYCLOAK_ADMIN_CLIENT_SECRET`
 - `AUTH_TOKEN_ENCRYPTION_KEY`
 - SMTP credentials for the optional ops script
 - Third-party API keys (Typesense admin key)
 
-See [`.env.example`](../.env.example) for the full secret template.
+See [`.env.example`](../.env.example) for secrets, connection details, SMTP settings, and Docker overrides. Docker Compose reads `.env` directly and does not load `config.yaml`. Middleware policies, auth session and signup limits, database pool tuning, Matrix upload limits, Typesense collection names, and search cache durations live in YAML. Any mapped setting can still be overridden in `.env` or the process environment.
+
+Redis builds its connection URL from `REDIS_HOST`, `REDIS_PORT`, and `REDIS_PASSWORD`. Use `localhost` when the backend runs on the host and `redis` when it runs in Docker Compose. `REDIS_URL` remains an explicit override for tests and deployments.
+
+Application PostgreSQL pools use `DB_TARGET=pgbouncer` by default in the local `.env.example`; use `DB_TARGET=direct` to connect straight to PostgreSQL. Host-run development uses `PGBOUNCER_HOST=localhost`, while Compose containers use `PGBOUNCER_HOST=pgbouncer`. If PgBouncer cannot accept a connection after retries, the application pool falls back to the direct PostgreSQL endpoint. Migrations and geo-sync continue to use the direct endpoint because they rely on session-level database behavior.
+
+Production Compose expects an externally managed PostgreSQL server configured with `POSTGRES_HOST` and optional `POSTGRES_PORT` (default `5432`). Provision the `chatapp` and `keycloak` databases and their login roles before deployment, using `APP_DB_PASSWORD` and `KEYCLOAK_DB_PASSWORD`; both PgBouncer and direct migration/fallback connections use the same external host.
 
 ## Search (Typesense)
 

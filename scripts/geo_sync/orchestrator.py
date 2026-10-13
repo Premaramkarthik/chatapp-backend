@@ -126,7 +126,7 @@ async def run_geo_sync(
 
 async def main_async(args) -> int:
     """Entry point for sync_geo_from_csc script."""
-    database_url = args.database_url or settings.database.dsn
+    database_url = args.database_url or settings.database.direct_dsn
     result = await run_geo_sync(
         database_url=database_url,
         truncate=args.truncate,

@@ -3,15 +3,15 @@
 The harness uses PostgreSQL on `127.0.0.1:15439`, Keycloak on `127.0.0.1:18080`,
 Synapse on `127.0.0.1:18008`, an API on `127.0.0.1:18000`, and Vite on
 `127.0.0.1:18030`. Keep those ports free. Its fixed credentials are test-only.
-The Compose project is `paripath-matrix-integration`; PostgreSQL and Synapse data
+The Compose project is `veliqone-matrix-integration`; PostgreSQL and Synapse data
 are disposable tmpfs data. Do not substitute an application DSN.
 
 From the backend checkout:
 
 ```bash
-rtk proxy docker build -t paripath-keycloak:local docker/keycloak
+rtk proxy docker build -t veliqone-keycloak:local -f deployment/keycloak/Dockerfile .
 rtk proxy python3 scripts/setup_matrix_integration.py
-rtk proxy docker compose -f /tmp/paripath-matrix-integration/compose.yaml up -d
+rtk proxy docker compose -f /tmp/veliqone-matrix-integration/compose.yaml up -d
 rtk proxy uv run python scripts/run_migrations.py --database-url postgresql://matrix_test:matrix-test-only@127.0.0.1:15439/matrix_test
 rtk proxy uv run python scripts/run_matrix_integration_api.py
 ```
@@ -30,7 +30,7 @@ The test uses hosted login, production client helpers, two users, three real dev
 encrypted delivery, reload, encrypted backup recovery, SAS comparison, cross-tab
 ownership, and scoped logout. Traces, screenshots, and videos are disabled to avoid
 capturing credentials. A recovery key is retained with mode `0600` under the isolated
-`/tmp/paripath-matrix-integration` directory to permit reruns; never commit it.
+`/tmp/veliqone-matrix-integration` directory to permit reruns; never commit it.
 
 For a fresh run, stop only this named test Compose project, remove only its test
 recovery-key artifact, and recreate the test stack. Never reset application databases,

@@ -5,7 +5,7 @@ from pathlib import Path
 
 
 def test_hosted_realm_requires_verification_and_explicit_broker_linking():
-    realm = json.loads(Path("docker/keycloak/realm-chatapp.json.example").read_text())
+    realm = json.loads(Path("deployment/keycloak/realm-chatapp.json.example").read_text())
     assert realm["verifyEmail"] and realm["registrationAllowed"]
     assert realm["resetPasswordAllowed"]
     assert realm["eventsListeners"] == ["jboss-logging"]

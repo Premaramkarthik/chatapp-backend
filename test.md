@@ -23,6 +23,8 @@ Three layers work together:
 ```bash
 cd chatapp-backend
 cp .env.example .env
+# Configure POSTGRES_HOST, APP_DB_PASSWORD, and KEYCLOAK_DB_PASSWORD for the
+# externally managed PostgreSQL server; provision chatapp and keycloak databases first.
 docker compose up -d
 uv run python scripts/run_migrations.py
 uv run uvicorn main:app --reload --host 0.0.0.0 --port 8000

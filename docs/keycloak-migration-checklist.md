@@ -6,7 +6,7 @@ Use this when moving from `--import-realm` to manual Keycloak configuration.
 
 - [ ] Remove `--import-realm` from Keycloak Docker command (done in `docker-compose.yml`)
 - [ ] Do **not** mount `realm-chatapp.json` at runtime
-- [ ] Keep `docker/keycloak/realm-chatapp.json.example` as reference only
+- [ ] Keep `deployment/keycloak/realm-chatapp.json.example` as reference only
 
 ## Keycloak console
 

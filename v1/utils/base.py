@@ -1,4 +1,4 @@
-"""Central custom exception hierarchy for PariPath modules.
+"""Central custom exception hierarchy for Veliqone modules.
 
 Keep domain and integration-specific exceptions here instead of defining ad hoc
 classes inside service modules. Routers can translate these exceptions into HTTP

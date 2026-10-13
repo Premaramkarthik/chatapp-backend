@@ -25,7 +25,7 @@ async def main() -> None:
                 "docker",
                 "compose",
                 "-f",
-                "/tmp/paripath-matrix-integration/compose.yaml",
+                "/tmp/veliqone-matrix-integration/compose.yaml",
                 mode,
                 "synapse",
                 stdout=asyncio.subprocess.DEVNULL,

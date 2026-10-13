@@ -41,12 +41,10 @@ Expected after removing realm import. Follow [keycloak-setup-guide.md](./keycloa
 
 **Cause:** Keycloak 26 needs a bootstrapped admin user. Legacy `KEYCLOAK_ADMIN` env vars are ignored.
 
-**Fix:** `docker-compose.yml` sets `KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD` (default `admin` / `admin`). Reset the Keycloak database and restart:
+**Fix:** `docker-compose.yml` sets `KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD`. Confirm the bootstrap credentials and that Keycloak can connect to its pre-provisioned database on the external PostgreSQL server. This Compose stack does not include a PostgreSQL container; use your database provider's administrative tools to inspect or repair Keycloak database state.
 
 ```bash
 docker compose stop keycloak
-docker compose exec postgres psql -U postgres -d postgres -c "DROP DATABASE IF EXISTS keycloak;"
-docker compose exec postgres psql -U postgres -d postgres -c "CREATE DATABASE keycloak OWNER chatapp;"
 docker compose up -d keycloak
 ```
 

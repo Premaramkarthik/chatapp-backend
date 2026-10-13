@@ -63,7 +63,7 @@ def parse_args() -> argparse.Namespace:
 
 async def main() -> int:
     args = parse_args()
-    dsn = args.database_url or settings.database.dsn
+    dsn = args.database_url or settings.database.direct_dsn
     migrations_dir = Path(args.migrations_dir)
     results = await run_migrations(
         dsn,

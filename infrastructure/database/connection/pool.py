@@ -129,13 +129,14 @@ async def connect_to_db_with_retry(max_retries: int = 5, delay: float = 2.0) -> 
     compete for Postgres ``max_connections``.
     """
     min_size, max_size = await _resolved_api_pool_min_max()
+    app_host, app_port = settings.database.application_host_port
     log_info(
         logger,
         "Connecting to PostgreSQL for API database pool",
         service="api",
         db_target=db_target_label(),
-        db_host=settings.database.host,
-        db_port=settings.database.port,
+        db_host=app_host,
+        db_port=app_port,
         db_name=settings.database.name,
         db_user=settings.database.user,
         pool_min=min_size,
@@ -146,59 +147,112 @@ async def connect_to_db_with_retry(max_retries: int = 5, delay: float = 2.0) -> 
         asyncpg.exceptions.InterfaceError,
         asyncpg.exceptions.CannotConnectNowError,
         asyncpg.exceptions.TooManyConnectionsError,
+        OSError,
+        TimeoutError,
+    )
+    fallback_errors = (
+        asyncpg.exceptions.InterfaceError,
+        asyncpg.exceptions.CannotConnectNowError,
+        OSError,
+        TimeoutError,
     )
 
-    for attempt in range(1, max_retries + 1):
+    async def create_pool(host: str, port: int) -> asyncpg.Pool:
+        last_error: BaseException | None = None
+        for attempt in range(1, max_retries + 1):
+            try:
+                return await asyncpg.create_pool(
+                    host=host,
+                    port=port,
+                    user=settings.database.user,
+                    password=settings.database.password_value,
+                    database=settings.database.name,
+                    min_size=min_size,
+                    max_size=max_size,
+                    command_timeout=settings.database.command_timeout_sec,
+                    timeout=settings.database.connect_timeout_sec,
+                    init=_init_connection,
+                )
+            except (
+                asyncpg.exceptions.InvalidPasswordError,
+                asyncpg.exceptions.InvalidAuthorizationSpecificationError,
+            ):
+                raise
+            except retry_errors as exc:
+                last_error = exc
+                log_warning(
+                    logger,
+                    "Database pool connection attempt failed; retrying",
+                    service="api",
+                    db_target=db_target_label(),
+                    attempt=attempt,
+                    max_retries=max_retries,
+                    error_type=type(exc).__name__,
+                )
+                if attempt < max_retries:
+                    await asyncio.sleep(delay * attempt)
+        assert last_error is not None
+        raise last_error
+
+    fallback_used = False
+    try:
+        pool = await create_pool(app_host, app_port)
+    except (
+        asyncpg.exceptions.InvalidPasswordError,
+        asyncpg.exceptions.InvalidAuthorizationSpecificationError,
+    ) as e:
+        error_msg = f"Database authentication failed for user '{settings.database.user}'."
+        log_error(logger, error_msg)
+        raise DatabaseConnectionError(error_msg) from e
+    except retry_errors as pgbouncer_error:
+        if settings.database.target_label != "pgbouncer":
+            log_exception(logger, "Could not connect to PostgreSQL after retries")
+            raise DatabaseConnectionError(
+                "Could not connect to PostgreSQL after retries"
+            ) from pgbouncer_error
+        if not isinstance(pgbouncer_error, fallback_errors):
+            raise DatabaseConnectionError(
+                "Could not connect to PgBouncer after retries"
+            ) from pgbouncer_error
+        log_warning(
+            logger,
+            "PgBouncer is unavailable after retries; falling back to direct PostgreSQL",
+            service="api",
+            error_type=type(pgbouncer_error).__name__,
+        )
+        fallback_used = True
         try:
-            pool = await asyncpg.create_pool(
-                host=settings.database.host,
-                port=settings.database.port,
-                user=settings.database.user,
-                password=settings.database.password_value,
-                database=settings.database.name,
-                min_size=min_size,
-                max_size=max_size,
-                command_timeout=settings.database.command_timeout_sec,
-                timeout=settings.database.connect_timeout_sec,
-                init=_init_connection,
-            )
-            _db.set_pool(pool)
-            log_info(
-                logger,
-                "API database connection pool is ready",
-                service="api",
-                db_target=db_target_label(),
-                pool_min=min_size,
-                pool_max=max_size,
-                db_host=settings.database.host,
-                db_port=settings.database.port,
-                db_name=settings.database.name,
-                initial_pool_size=pool.get_size(),
-            )
-            return pool
-        except asyncpg.exceptions.InvalidPasswordError as e:
+            pool = await create_pool(settings.database.host, settings.database.port)
+        except (
+            asyncpg.exceptions.InvalidPasswordError,
+            asyncpg.exceptions.InvalidAuthorizationSpecificationError,
+        ) as e:
             error_msg = f"Database authentication failed for user '{settings.database.user}'."
             log_error(logger, error_msg)
             raise DatabaseConnectionError(error_msg) from e
         except retry_errors as e:
-            log_warning(
-                logger,
-                "Database pool connection attempt failed; retrying",
-                service="api",
-                attempt=attempt,
-                max_retries=max_retries,
-                error_type=type(e).__name__,
-                detail=str(e),
-            )
-            if attempt < max_retries:
-                await asyncio.sleep(delay * attempt)
-            else:
-                log_exception(logger, "Could not connect to PostgreSQL after retries")
-                raise DatabaseConnectionError(
-                    "Could not connect to PostgreSQL after retries"
-                ) from e
+            log_exception(logger, "Could not connect to PostgreSQL after retries")
+            raise DatabaseConnectionError("Could not connect to PostgreSQL after retries") from e
 
-    raise DatabaseConnectionError("Failed to establish database connection")
+    _db.set_pool(pool)
+    connected_host, connected_port = (
+        (settings.database.host, settings.database.port)
+        if fallback_used
+        else (app_host, app_port)
+    )
+    log_info(
+        logger,
+        "API database connection pool is ready",
+        service="api",
+        db_target=db_target_label(),
+        pool_min=min_size,
+        pool_max=max_size,
+        db_host=connected_host,
+        db_port=connected_port,
+        db_name=settings.database.name,
+        initial_pool_size=pool.get_size(),
+    )
+    return pool
 
 
 async def close_db() -> None:

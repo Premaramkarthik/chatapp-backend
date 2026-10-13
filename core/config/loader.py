@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 import yaml
+from dotenv import load_dotenv
 
 from v1.utils.base import ConfigurationError
 
@@ -78,6 +79,82 @@ YAML_ENV_MAP: dict[tuple[str, ...], str] = {
     ("geo", "list_limit_countries"): "GEO_LIST_LIMIT_COUNTRIES",
     ("geo", "list_limit_states"): "GEO_LIST_LIMIT_STATES",
     ("geo", "list_limit_cities"): "GEO_LIST_LIMIT_CITIES",
+    ("middleware", "cors_enabled"): "MIDDLEWARE_CORS_ENABLED",
+    ("middleware", "cors_origins"): "MIDDLEWARE_CORS_ORIGINS",
+    ("middleware", "cors_allow_credentials"): "MIDDLEWARE_CORS_ALLOW_CREDENTIALS",
+    ("middleware", "cors_allow_methods"): "MIDDLEWARE_CORS_ALLOW_METHODS",
+    ("middleware", "cors_allow_headers"): "MIDDLEWARE_CORS_ALLOW_HEADERS",
+    ("middleware", "request_id_header"): "MIDDLEWARE_REQUEST_ID_HEADER",
+    ("middleware", "auth_enabled"): "MIDDLEWARE_AUTH_ENABLED",
+    ("middleware", "auth_protected_prefixes"): "MIDDLEWARE_AUTH_PROTECTED_PREFIXES",
+    ("middleware", "auth_public_paths"): "MIDDLEWARE_AUTH_PUBLIC_PATHS",
+    ("middleware", "auth_public_prefixes"): "MIDDLEWARE_AUTH_PUBLIC_PREFIXES",
+    ("middleware", "rate_limit_excluded_paths"): "MIDDLEWARE_RATE_LIMIT_EXCLUDED_PATHS",
+    ("middleware", "db_session_enabled"): "MIDDLEWARE_DB_SESSION_ENABLED",
+    ("middleware", "db_session_excluded_paths"): "MIDDLEWARE_DB_SESSION_EXCLUDED_PATHS",
+    ("middleware", "log_request_body"): "MIDDLEWARE_LOG_REQUEST_BODY",
+    ("middleware", "csrf_enabled"): "MIDDLEWARE_CSRF_ENABLED",
+    ("middleware", "security_headers_enabled"): "MIDDLEWARE_SECURITY_HEADERS_ENABLED",
+    ("middleware", "csrf_excluded_paths"): "MIDDLEWARE_CSRF_EXCLUDED_PATHS",
+    ("middleware", "content_security_policy"): "MIDDLEWARE_CONTENT_SECURITY_POLICY",
+    ("middleware", "docs_content_security_policy"): "MIDDLEWARE_DOCS_CONTENT_SECURITY_POLICY",
+    ("middleware", "docs_csp_paths"): "MIDDLEWARE_DOCS_CSP_PATHS",
+    ("database", "target"): "DB_TARGET",
+    ("database", "pool_auto"): "DB_POOL_AUTO",
+    ("database", "pool_auto_concurrent_requests"): "DB_POOL_AUTO_CONCURRENT_REQUESTS",
+    ("database", "pool_auto_ceiling"): "DB_POOL_AUTO_CEILING",
+    ("auth", "cookie_name"): "AUTH_COOKIE_NAME",
+    ("auth", "csrf_cookie_name"): "AUTH_CSRF_COOKIE_NAME",
+    ("auth", "csrf_header_name"): "AUTH_CSRF_HEADER_NAME",
+    ("auth", "cookie_domain"): "AUTH_COOKIE_DOMAIN",
+    ("auth", "cookie_secure"): "AUTH_COOKIE_SECURE",
+    ("auth", "cookie_samesite"): "AUTH_COOKIE_SAMESITE",
+    ("auth", "signin_state_ttl_sec"): "AUTH_SIGNIN_STATE_TTL_SEC",
+    ("auth", "refresh_leeway_sec"): "AUTH_REFRESH_LEEWAY_SEC",
+    ("auth", "session_cache_ttl_sec"): "AUTH_SESSION_CACHE_TTL_SEC",
+    ("auth", "revoke_cache_ttl_sec"): "AUTH_REVOKE_CACHE_TTL_SEC",
+    ("auth", "captcha_required"): "AUTH_CAPTCHA_REQUIRED",
+    ("auth", "signup_idempotency_ttl_sec"): "AUTH_SIGNUP_IDEMPOTENCY_TTL_SEC",
+    ("auth", "signup_ip_limit"): "AUTH_SIGNUP_IP_LIMIT",
+    ("auth", "signup_ip_window_sec"): "AUTH_SIGNUP_IP_WINDOW_SEC",
+    ("auth", "signup_device_limit"): "AUTH_SIGNUP_DEVICE_LIMIT",
+    ("auth", "signup_device_window_sec"): "AUTH_SIGNUP_DEVICE_WINDOW_SEC",
+    ("auth", "signup_domain_limit"): "AUTH_SIGNUP_DOMAIN_LIMIT",
+    ("auth", "signup_domain_window_sec"): "AUTH_SIGNUP_DOMAIN_WINDOW_SEC",
+    ("auth", "signup_resend_email_limit"): "AUTH_SIGNUP_RESEND_EMAIL_LIMIT",
+    ("auth", "signup_resend_email_window_sec"): "AUTH_SIGNUP_RESEND_EMAIL_WINDOW_SEC",
+    ("auth", "signup_social_ip_limit"): "AUTH_SIGNUP_SOCIAL_IP_LIMIT",
+    ("auth", "signup_social_ip_window_sec"): "AUTH_SIGNUP_SOCIAL_IP_WINDOW_SEC",
+    ("auth", "signup_max_verification_sends"): "AUTH_SIGNUP_MAX_VERIFICATION_SENDS",
+    ("auth", "signup_session_ttl_sec"): "AUTH_SIGNUP_SESSION_TTL_SEC",
+    ("auth", "verification_reconcile_interval_sec"): "AUTH_VERIFICATION_RECONCILE_INTERVAL_SEC",
+    ("auth", "verification_reconcile_batch_size"): "AUTH_VERIFICATION_RECONCILE_BATCH_SIZE",
+    ("auth", "signup_max_password_length"): "AUTH_SIGNUP_MAX_PASSWORD_LENGTH",
+    ("auth", "blocked_email_domains"): "AUTH_BLOCKED_EMAIL_DOMAINS",
+    ("matrix", "access_token_ttl_sec"): "MATRIX_ACCESS_TOKEN_TTL_SEC",
+    ("matrix", "session_cache_ttl_sec"): "MATRIX_SESSION_CACHE_TTL_SEC",
+    ("matrix", "image_max_bytes"): "MATRIX_IMAGE_MAX_BYTES",
+    ("matrix", "document_max_bytes"): "MATRIX_DOCUMENT_MAX_BYTES",
+    ("matrix", "video_max_bytes"): "MATRIX_VIDEO_MAX_BYTES",
+    ("matrix", "message_rate_limit"): "MATRIX_MESSAGE_RATE_LIMIT",
+    ("matrix", "message_rate_window_sec"): "MATRIX_MESSAGE_RATE_WINDOW_SEC",
+    ("matrix", "media_rate_limit"): "MATRIX_MEDIA_RATE_LIMIT",
+    ("matrix", "media_rate_window_sec"): "MATRIX_MEDIA_RATE_WINDOW_SEC",
+    ("typesense", "enabled"): "TYPESENSE_ENABLED",
+    ("typesense", "users_collection"): "TYPESENSE_USERS_COLLECTION",
+    ("typesense", "travelers_collection"): "TYPESENSE_TRAVELERS_COLLECTION",
+    ("typesense", "cities_collection"): "TYPESENSE_CITIES_COLLECTION",
+    ("typesense", "countries_collection"): "TYPESENSE_COUNTRIES_COLLECTION",
+    ("typesense", "states_collection"): "TYPESENSE_STATES_COLLECTION",
+    ("typesense", "user_recommendations_collection"): "TYPESENSE_USER_RECOMMENDATIONS_COLLECTION",
+    ("typesense", "popular_searches_collection"): "TYPESENSE_POPULAR_SEARCHES_COLLECTION",
+    ("search", "cache_ttl_city_sec"): "SEARCH_CACHE_TTL_CITY_SEC",
+    ("search", "cache_ttl_country_sec"): "SEARCH_CACHE_TTL_COUNTRY_SEC",
+    ("search", "cache_ttl_state_sec"): "SEARCH_CACHE_TTL_STATE_SEC",
+    ("search", "cache_ttl_user_sec"): "SEARCH_CACHE_TTL_USER_SEC",
+    ("search", "cache_ttl_traveler_sec"): "SEARCH_CACHE_TTL_TRAVELER_SEC",
+    ("search", "cache_ttl_global_sec"): "SEARCH_CACHE_TTL_GLOBAL_SEC",
+    ("search", "cache_ttl_recent_sec"): "SEARCH_CACHE_TTL_RECENT_SEC",
 }
 
 
@@ -107,6 +184,8 @@ def load_yaml_config(path: Path) -> dict[str, Any]:
 
 def apply_yaml_defaults_to_env(path: Path) -> dict[str, Any]:
     """Apply YAML values to os.environ only when not already set."""
+    # Load local overrides first, preserving any deployment environment values.
+    load_dotenv(path.parent / ".env", override=False)
     flat = load_yaml_config(path)
     for env_key, value in flat.items():
         if env_key in os.environ:

@@ -136,7 +136,7 @@ class MatrixSessionService:
                     "type": "m.login.token",
                     "token": login_token,
                     "device_id": attempt["device_id"],
-                    "initial_device_display_name": "PariPath browser",
+                    "initial_device_display_name": "Veliqone browser",
                     "refresh_token": True,
                 },
             )
@@ -198,7 +198,7 @@ class MatrixSessionService:
                 )
                 await conn.execute(
                     """INSERT INTO matrix_user_devices(user_id,device_id,device_label,last_seen_at)
-                    VALUES($1,$2,'PariPath browser',now()) ON CONFLICT(user_id,device_id)
+                    VALUES($1,$2,'Veliqone browser',now()) ON CONFLICT(user_id,device_id)
                     DO UPDATE SET last_seen_at=now()""",
                     attempt["user_id"],
                     attempt["device_id"],

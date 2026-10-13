@@ -1,10 +1,10 @@
 # Keycloak Setup Guide (One-Time)
 
-Keycloak is **no longer imported from realm JSON** at Docker startup. Configure the realm manually once (or use your own IaC). Reference structure: [`docker/keycloak/realm-chatapp.json.example`](../docker/keycloak/realm-chatapp.json.example).
+Keycloak is **no longer imported from realm JSON** at Docker startup. Configure the realm manually once (or use your own IaC). Reference structure: [`deployment/keycloak/realm-chatapp.json.example`](../deployment/keycloak/realm-chatapp.json.example).
 
 ## Prerequisites
 
-- Keycloak 26 running (see `docker compose up keycloak`)
+- Keycloak 26 running (see `docker compose up keycloak`); configure `POSTGRES_HOST` and provision the `keycloak` database and role first
 - Admin console: `http://localhost:8180` (bootstrap via `KC_BOOTSTRAP_ADMIN_USERNAME` / `KC_BOOTSTRAP_ADMIN_PASSWORD`, default `admin` / `admin`)
 
 ## 1. Create realm
@@ -96,7 +96,7 @@ Without SMTP, `POST /v1/auth/signup/start` fails at `send-verify-email` with `ke
 
 ## 6. Verify backend startup
 
-**Local auto-bootstrap:** When `KEYCLOAK_AUTO_BOOTSTRAP=true` (default in `config.yaml` for local), the API creates the `chatapp` realm from [`docker/keycloak/realm-chatapp.json.example`](../docker/keycloak/realm-chatapp.json.example) before startup validation if the OIDC well-known document returns 404. Requires `KEYCLOAK_BOOTSTRAP_ADMIN` credentials (docker-compose default `admin` / `admin`). Set `KEYCLOAK_AUTO_BOOTSTRAP=false` in production; realm provisioning must be manual or IaC.
+**Local auto-bootstrap:** When `KEYCLOAK_AUTO_BOOTSTRAP=true` (default in `config.yaml` for local), the API creates the `chatapp` realm from [`deployment/keycloak/realm-chatapp.json.example`](../deployment/keycloak/realm-chatapp.json.example) before startup validation if the OIDC well-known document returns 404. Requires `KEYCLOAK_BOOTSTRAP_ADMIN` credentials (docker-compose default `admin` / `admin`). Set `KEYCLOAK_AUTO_BOOTSTRAP=false` in production; realm provisioning must be manual or IaC.
 
 With Keycloak configured, start the API. Startup order: realm bootstrap → SMTP → Google IdP (when configured) → validation. Startup validation checks:
 
